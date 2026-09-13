@@ -11,7 +11,7 @@ return function(Window, meta)
     local Tab = Window:CreateTab({
         Name = "Misc",
         Icon = "🧰",
-        Order = (meta and meta.Order) or 60,
+        Order = (meta and meta.Order) or 40,
     })
 
     ------------------------------------------------------------
