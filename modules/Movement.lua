@@ -14,7 +14,7 @@ return function(Window, meta)
     local Tab = Window:CreateTab({
         Name = "Movement",
         Icon = "🏃",
-        Order = (meta and meta.Order) or 70,
+        Order = (meta and meta.Order) or 30,
     })
 
     local Section = Tab:CreateSection({
