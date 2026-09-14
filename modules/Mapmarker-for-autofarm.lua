@@ -1,14 +1,3 @@
--- Zone_redacted.lua
--- Universal Modular Utility / Voxlblade
--- World-space zone editor for autofarm.
--- JSON:
--- {
---   "Name": "...",
---   "Points": [{"X":..., "Y":..., "Z":...}],
---   "Edges": [{"A":1,"B":2}],
---   "FilledZones": [{"Points":[1,2,3,4],"Filled":true}]
--- }
-
 return function(Window, meta)
     local Players = game:GetService("Players")
     local RunService = game:GetService("RunService")
@@ -957,9 +946,9 @@ return function(Window, meta)
     end)
 
     local Main = Window:CreateTab({
-        Name = "Map",
-        Icon = "🗺️",
-        Order = meta and meta.Order or 15
+        Name = "Main",
+        Icon = "🏠",
+        Order = meta and meta.Order or 90
     })
 
     local EditorSection = Main:CreateSection({
@@ -1178,4 +1167,3 @@ return function(Window, meta)
 
     return Cleanup
 end
-
