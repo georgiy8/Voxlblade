@@ -1,325 +1,281 @@
--- modules/Autofarm.lua
--- Автофарм для Universal-modular-utility.
--- Использует API из README: Window:CreateTab, Tab:CreateSection,
--- Section:AddToggle/AddSlider/AddDropdown/AddLabel/AddButton/AddKeybind.
--- Регистрируется в loader.lua или Places.lua.
+--========================================================--
+-- Autofarm Module
+-- CFly to the enemy Hitbox (MeshPart), swing sword + weapon art every N ms.
+-- Priority dropdown picks mutated enemies (Bloody/Corrupt/Legendary/Magical)
+-- before any non-mutated target.
+--========================================================--
+
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+
+local Events     = ReplicatedStorage:WaitForChild("Events")
+local SwingSword = Events:WaitForChild("SwingSword")
+local WeaponArt  = Events:WaitForChild("WeaponArt")
+
+local ENEMY_LIST = {
+    "Buni", "DireBuni", "PlainsWoof", "Mageling", "Croakernaut", "LordFrogg",
+    "Bulfrogg", "Toadzerker", "Dragigator", "Lilimonster", "Drone", "Bumblz",
+    "Bomber", "QueenBumblz", "Puffball", "SporeBossMan", "Sporeling",
+    "Lord Stratos Altolodon", "Whirlray", "Caci", "Slizard", "CaciKing",
+    "StoneCleric", "VoidRoot", "Bowldur", "BastionGuardian", "StoneArcher",
+    "StoneKnight", "CrazyHare", "BaniPrince", "RedRockHare", "Batty",
+    "GlacialSnapper", "WinterWoof", "Delta-Spider", "Stalker", "Scow",
+    "SteamGolem", "Omega-Batty", "DeepSpider", "BrainBurner", "Proto-Mungus",
+    "Easter", "Buni", "Grumpkin", "THEHALLOWSOUL"
+}
+
+-- For each mutation name the enemy must have BOTH:
+--   ParticleEmitter named <Mutation> with Enabled = true
+--   PointLight      named <Mutation>L with Enabled = true
+local MUTATION_LIST = { "Bloody", "Corrupt", "Legendary", "Magical" }
 
 return function(Window, meta)
-    -- ============================================================
-    -- СЕРВИСЫ
-    -- ============================================================
-    local Players = game:GetService("Players")
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    local player = Players.LocalPlayer
 
-    -- ============================================================
-    -- REMOTES
-    -- ============================================================
-    local Events = ReplicatedStorage:WaitForChild("Events", 10)
-    if not Events then
-        warn("[Autofarm] ReplicatedStorage.Events не найден")
-        return
+    local Tab = Window:CreateTab({
+        Name = "Autofarm",
+        Icon = "⚔️",
+        Order = (meta and meta.Order) or 35,
+    })
+
+    local EnemySection    = Tab:CreateSection({ Name = "Enemies" })
+    local PrioritySection = Tab:CreateSection({ Name = "Priorities" })
+    local SettingsSection = Tab:CreateSection({ Name = "Settings" })
+
+    ------------------------------------------------------------
+    -- State
+    ------------------------------------------------------------
+
+    local Enabled         = false
+    local Thread          = nil
+    local Delay           = 0.3      -- 300 ms between attacks
+    local TeleportHeight  = 3
+    local SelectedEnemies = {}
+    local SelectedMutations = {}
+
+    local ToggleWidget -- set below, referenced by the keybind
+
+    ------------------------------------------------------------
+    -- Helpers
+    ------------------------------------------------------------
+
+    -- "Buni" should also match "Buni1234", but never "DireBuni"
+    local function NameMatches(Name, Pattern)
+        if Name == Pattern then return true end
+        if Name:sub(1, #Pattern) ~= Pattern then return false end
+        return Name:sub(#Pattern + 1):match("^%d+$") ~= nil
     end
 
-    local SwingSword = Events:WaitForChild("SwingSword", 10)
-    local WeaponArt  = Events:WaitForChild("WeaponArt", 10)
-
-    if not SwingSword then warn("[Autofarm] SwingSword не найден") end
-    if not WeaponArt  then warn("[Autofarm] WeaponArt не найден")  end
-
-    -- ============================================================
-    -- СПИСКИ
-    -- ============================================================
-    local ENEMY_LIST = {
-        "Buni", "DireBuni", "PlainsWoof", "Mageling", "Croakernaut", "LordFrogg",
-        "Bulfrogg", "Toadzerker", "Dragigator", "Lilimonster", "Drone", "Bumblz",
-        "Bomber", "QueenBumblz", "Puffball", "SporeBossMan", "Sporeling",
-        "Lord Stratos Altolodon", "Whirlray", "Caci", "Slizard", "CaciKing",
-        "StoneCleric", "VoidRoot", "Bowldur", "BastionGuardian", "StoneArcher",
-        "StoneKnight", "CrazyHare", "BaniPrince", "RedRockHare", "Batty",
-        "GlacialSnapper", "WinterWoof", "Delta-Spider", "Stalker", "Scow",
-        "SteamGolem", "Omega-Batty", "DeepSpider", "BrainBurner", "Proto-Mungus",
-        "Easter", "Buni", "Grumpkin", "THEHALLOWSOUL"
-    }
-
-    -- Приоритеты мутаций. Для каждой — ParticleEmitter с именем мутации
-    -- и PointLight с именем мутации.."L". Оба должны быть Enabled.
-    local MUTATION_LIST = { "Bloody", "Corrupt", "Legendary", "Magical" }
-
-    -- ============================================================
-    -- СОСТОЯНИЕ
-    -- ============================================================
-    local State = {
-        Enabled       = false,
-        Running       = false,
-        Enemies       = {},        -- выбранные имена (пусто = все из ENEMY_LIST)
-        Mutations     = {},        -- выбранные приоритеты (порядок = приоритет)
-        Delay         = 0.3,       -- 300 мс
-        FlyHeight     = 3,
-        Target        = nil,
-        TargetName    = "—",
-        Attacks       = 0,
-    }
-
-    -- ============================================================
-    -- ЛОГИКА: ПОИСК ВРАГОВ
-    -- ============================================================
-
-    -- Проверяет, что у модели есть Hitbox (MeshPart) и Humanoid
-    local function isEnemy(model)
-        if not model:IsA("Model") then return false end
-        if not model:FindFirstChild("Humanoid") then return false end
-        return model:FindFirstChild("Hitbox", true) ~= nil
-    end
-
-    -- Проверяет, что имя модели подходит под фильтр
-    local function matchesFilter(name)
-        if #State.Enemies == 0 then
-            return table.find(ENEMY_LIST, name) ~= nil
+    local function PassesFilter(Name)
+        local Pool = (#SelectedEnemies > 0) and SelectedEnemies or ENEMY_LIST
+        for _, Pattern in ipairs(Pool) do
+            if NameMatches(Name, Pattern) then return true end
         end
-        return table.find(State.Enemies, name) ~= nil
+        return false
     end
 
-    -- Ищет хитбокс (MeshPart) внутри модели врага
-    local function getHitbox(enemy)
-        local hb = enemy:FindFirstChild("Hitbox", true)
-        if hb and hb:IsA("MeshPart") then return hb end
+    local function GetHitbox(Model)
+        local Hitbox = Model:FindFirstChild("Hitbox", true)
+        if Hitbox and Hitbox:IsA("MeshPart") then return Hitbox end
         return nil
     end
 
-    -- Проверяет наличие мутации: ParticleEmitter(имя) + PointLight(имя.."L")
-    local function hasMutation(enemy, mutation)
-        local emitter = enemy:FindFirstChild(mutation, true)
-        local light   = enemy:FindFirstChild(mutation .. "L", true)
-        if not emitter or not light then return false end
-        if not emitter:IsA("ParticleEmitter") then return false end
-        if not light:IsA("PointLight") then return false end
-        return emitter.Enabled and light.Enabled
+    local function IsEnemy(Model)
+        if not Model:IsA("Model") then return false end
+        if not Model:FindFirstChildWhichIsA("Humanoid") then return false end
+        return GetHitbox(Model) ~= nil
     end
 
-    -- Сканирует workspace и возвращает список подходящих врагов
-    local function scanEnemies()
-        local list = {}
-        for _, obj in ipairs(workspace:GetChildren()) do
-            if isEnemy(obj) and matchesFilter(obj.Name) then
-                table.insert(list, obj)
+    local function HasMutation(Model, Mutation)
+        local Emitter = Model:FindFirstChild(Mutation, true)
+        local Light   = Model:FindFirstChild(Mutation .. "L", true)
+        if not (Emitter and Light) then return false end
+        if not Emitter:IsA("ParticleEmitter") then return false end
+        if not Light:IsA("PointLight") then return false end
+        return Emitter.Enabled and Light.Enabled
+    end
+
+    local function ScanEnemies()
+        local List = {}
+        for _, Obj in ipairs(workspace:GetChildren()) do
+            if IsEnemy(Obj) and PassesFilter(Obj.Name) then
+                table.insert(List, Obj)
             end
         end
-        return list
+        return List
     end
 
-    -- Дистанция от игрока до хитбокса
-    local function distanceTo(enemy)
-        local char = player.Character
-        if not char then return math.huge end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not root then return math.huge end
-        local hb = getHitbox(enemy)
-        if not hb then return math.huge end
-        return (hb.Position - root.Position).Magnitude
+    local function DistanceTo(Model)
+        local Character = LocalPlayer.Character
+        local Root = Character and Character:FindFirstChild("HumanoidRootPart")
+        if not Root then return math.huge end
+        local Hitbox = GetHitbox(Model)
+        if not Hitbox then return math.huge end
+        return (Hitbox.Position - Root.Position).Magnitude
     end
 
-    -- Выбор цели: сначала приоритетные мутации по порядку, потом ближайший
-    local function pickTarget()
-        local enemies = scanEnemies()
-        if #enemies == 0 then return nil, nil end
+    ------------------------------------------------------------
+    -- Target selection
+    ------------------------------------------------------------
 
-        -- 1. Приоритеты
-        for _, mut in ipairs(State.Mutations) do
-            local best, bestDist = nil, math.huge
-            for _, enemy in ipairs(enemies) do
-                if hasMutation(enemy, mut) then
-                    local d = distanceTo(enemy)
-                    if d < bestDist then
-                        bestDist = d
-                        best = enemy
+    local function PickTarget()
+        local Enemies = ScanEnemies()
+        if #Enemies == 0 then return nil end
+
+        -- priority mutations first, in the order the user selected them
+        for _, Mutation in ipairs(SelectedMutations) do
+            local Best, BestDist = nil, math.huge
+            for _, Enemy in ipairs(Enemies) do
+                if HasMutation(Enemy, Mutation) then
+                    local Dist = DistanceTo(Enemy)
+                    if Dist < BestDist then
+                        BestDist = Dist
+                        Best     = Enemy
                     end
                 end
             end
-            if best then return best, mut end
+            if Best then return Best end
         end
 
-        -- 2. Ближайший без приоритета
-        local closest, minDist = nil, math.huge
-        for _, enemy in ipairs(enemies) do
-            local d = distanceTo(enemy)
-            if d < minDist then
-                minDist = d
-                closest = enemy
+        -- fallback: closest non-mutated enemy from the filtered pool
+        local Closest, MinDist = nil, math.huge
+        for _, Enemy in ipairs(Enemies) do
+            local Dist = DistanceTo(Enemy)
+            if Dist < MinDist then
+                MinDist = Dist
+                Closest = Enemy
             end
         end
-        return closest, nil
+        return Closest
     end
 
-    -- ============================================================
-    -- ЛОГИКА: АТАКА
-    -- ============================================================
+    ------------------------------------------------------------
+    -- Attack
+    ------------------------------------------------------------
 
-    -- CFly к хитбоксу + вызов обоих Remote
-    local function attack(enemy)
-        local char = player.Character
-        if not char then return end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not root then return end
+    local function Attack(Enemy)
+        local Character = LocalPlayer.Character
+        if not Character then return end
 
-        local hb = getHitbox(enemy)
-        if not hb then return end
+        local Hitbox = GetHitbox(Enemy)
+        if not Hitbox then return end
 
-        -- CFly: телепорт к хитбоксу с небольшим подъёмом
-        char:PivotTo(CFrame.new(hb.Position + Vector3.new(0, State.FlyHeight, 0)))
+        local Pos = Hitbox.Position
 
-        -- Вектор удара = позиция хитбокса
-        local pos = hb.Position
+        -- CFly: teleport straight above the hitbox
+        Character:PivotTo(CFrame.new(Pos + Vector3.new(0, TeleportHeight, 0)))
 
-        if SwingSword then
-            pcall(function()
-                SwingSword:FireServer("L", false, pos)
-            end)
-        end
-
-        if WeaponArt then
-            pcall(function()
-                WeaponArt:FireServer(nil, true, pos)
-            end)
-        end
-
-        State.Attacks = State.Attacks + 1
+        -- SwingSword: ("L", false, Vector3)
+        SwingSword:FireServer("L", false, Pos)
+        -- WeaponArt: (nil, true, Vector3)
+        WeaponArt:FireServer(nil, true, Pos)
     end
 
-    -- ============================================================
-    -- ЦИКЛ
-    -- ============================================================
-    local function startLoop()
-        if State.Running then return end
-        State.Running = true
+    ------------------------------------------------------------
+    -- Loop
+    ------------------------------------------------------------
 
-        task.spawn(function()
-            while State.Enabled do
-                local target, prio = pickTarget()
+    local function Stop()
+        Enabled = false
+        if Thread then
+            pcall(task.cancel, Thread)
+            Thread = nil
+        end
+    end
 
-                if target then
-                    State.Target = target
-                    State.TargetName = target.Name .. (prio and (" • " .. prio) or "")
-                    attack(target)
-                else
-                    State.Target = nil
-                    State.TargetName = "—"
+    local function Start()
+        Stop()
+        Enabled = true
+
+        Thread = task.spawn(function()
+            while Enabled do
+                local Target = PickTarget()
+                if Target then
+                    Attack(Target)
                 end
-
-                task.wait(State.Delay)
+                task.wait(Delay)
             end
-            State.Running = false
         end)
     end
 
-    local function stopLoop()
-        State.Enabled = false
-        State.Running = false
-        State.Target = nil
-        State.TargetName = "—"
+    -- single entry point: used by both the Toggle and the Keybind
+    -- so the two controls can never fall out of sync
+    local function SetEnabled(State)
+        if State then
+            Start()
+        else
+            Stop()
+        end
+        if ToggleWidget then
+            ToggleWidget:SetValue(Enabled) -- SetValue does not fire Callback, so no loop
+        end
     end
 
-    -- ============================================================
-    -- UI
-    -- ============================================================
-    local Tab = Window:CreateTab({
-        Name = "AutoFarm",
-        Icon = "🧑‍🌾",
-        Order = (meta and meta.Order) or 15,
-    })
+    ------------------------------------------------------------
+    -- Widgets
+    ------------------------------------------------------------
 
-    -- ---------- Секция управления ----------
-    local MainSec = Tab:CreateSection({ Name = "Управление" })
-
-    local ToggleEnable = MainSec:AddToggle({
-        Text = "Включить автофарм",
-        Default = false,
-        Callback = function(v)
-            State.Enabled = v
-            if v then startLoop() else stopLoop() end
-        end,
-    })
-
-    MainSec:AddKeybind({
-        Text = "Клавиша вкл/выкл",
-        Default = Enum.KeyCode.F,
-        Callback = function()
-            local v = not State.Enabled
-            State.Enabled = v
-            ToggleEnable:SetValue(v)
-            if v then startLoop() else stopLoop() end
-        end,
-    })
-
-    MainSec:AddSlider({
-        Text = "Задержка между ударами (с)",
-        Min = 0.1,
-        Max = 1.0,
-        Default = 0.3,
-        Increment = 0.05,
-        Callback = function(v)
-            State.Delay = v
-        end,
-    })
-
-    MainSec:AddSlider({
-        Text = "Высота полёта (studs)",
-        Min = 0,
-        Max = 15,
-        Default = 3,
-        Increment = 0.5,
-        Callback = function(v)
-            State.FlyHeight = v
-        end,
-    })
-
-    -- ---------- Секция врагов ----------
-    local EnemiesSec = Tab:CreateSection({ Name = "Враги" })
-
-    EnemiesSec:AddDropdown({
-        Text = "Кого фармить (пусто = все)",
+    EnemySection:AddDropdown({
+        Text = "Farm Enemies (empty = all)",
         Options = ENEMY_LIST,
         MultiSelect = true,
         Default = {},
-        Callback = function(values)
-            State.Enemies = values
-        end,
+        Callback = function(Values)
+            SelectedEnemies = Values
+        end
     })
 
-    -- ---------- Секция приоритетов ----------
-    local PrioritySec = Tab:CreateSection({ Name = "Приоритеты мутаций" })
-
-    PrioritySec:AddDropdown({
-        Text = "Порядок приоритета",
+    PrioritySection:AddDropdown({
+        Text = "Priority Mutations",
         Options = MUTATION_LIST,
         MultiSelect = true,
         Default = {},
-        Callback = function(values)
-            State.Mutations = values
-        end,
-    })
-
-    -- ---------- Секция информации ----------
-    local InfoSec = Tab:CreateSection({ Name = "Информация" })
-
-    local LblStatus = InfoSec:AddLabel({ Text = "Статус: остановлен" })
-    local LblTarget = InfoSec:AddLabel({ Text = "Цель: —" })
-    local LblStats  = InfoSec:AddLabel({ Text = "Ударов: 0" })
-
-    InfoSec:AddButton({
-        Text = "Сбросить статистику",
-        Callback = function()
-            State.Attacks = 0
-        end,
-    })
-
-    -- ---------- Обновление лейблов ----------
-    task.spawn(function()
-        while true do
-            task.wait(0.4)
-            LblStatus:SetText("Статус: " .. (State.Enabled and "работает" or "остановлен"))
-            LblTarget:SetText("Цель: " .. State.TargetName)
-            LblStats:SetText("Ударов: " .. tostring(State.Attacks))
+        Callback = function(Values)
+            SelectedMutations = Values -- order matters: first pick wins first
         end
-    end)
+    })
+
+    ToggleWidget = SettingsSection:AddToggle({
+        Text = "Enable Autofarm",
+        Default = false,
+        Callback = function(Value)
+            SetEnabled(Value)
+        end
+    })
+
+    SettingsSection:AddKeybind({
+        Text = "Autofarm Hotkey",
+        Default = Enum.KeyCode.F,
+        Callback = function()
+            SetEnabled(not Enabled)
+        end
+    })
+
+    SettingsSection:AddSlider({
+        Text = "Attack Delay (s)",
+        Min = 0.1,
+        Max = 1.0,
+        Default = Delay,
+        Increment = 0.05,
+        Callback = function(Value)
+            Delay = Value -- takes effect immediately, even while Enabled
+        end
+    })
+
+    SettingsSection:AddSlider({
+        Text = "Teleport Height",
+        Min = 0,
+        Max = 15,
+        Default = TeleportHeight,
+        Increment = 0.5,
+        Callback = function(Value)
+            TeleportHeight = Value
+        end
+    })
+
+    -- kill the loop on respawn/death, otherwise the old Character reference
+    -- keeps getting pivoted for a frame before the model is destroyed
+    LocalPlayer.CharacterRemoving:Connect(Stop)
+
 end
