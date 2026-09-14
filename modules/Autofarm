@@ -1,673 +1,635 @@
---[[
-    BuniFarm.lua
-    Universal Modular Utility
+return function(Window, meta)
 
-    Tab:
-        Name  = "BuniFarm"
-        Icon  = "🐰"
-        Order = 30
+    ------------------------------------------------------------
+    -- Services
+    ------------------------------------------------------------
 
-    Description:
-        Finds selected mobs in Workspace, gets their Hitbox,
-        tweens the player to the target and automatically
-        switches to another target when the current one disappears.
-]]
+    local Players = game:GetService("Players")
+    local TweenService = game:GetService("TweenService")
 
-local BuniFarm = {}
+    local LocalPlayer = Players.LocalPlayer
 
---// Services
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
+    ------------------------------------------------------------
+    -- Configuration
+    ------------------------------------------------------------
 
-local LocalPlayer = Players.LocalPlayer
+    local TAB_NAME = "BuniFarm"
+    local TAB_ICON = "🐰"
 
---//========================================================
---// CONFIG
---//========================================================
+    local DEFAULT_SPEED = 80
+    local MIN_SPEED = 1
+    local MAX_SPEED = 500
 
-local TAB_NAME = "BuniFarm"
-local TAB_ICON = "🐰"
-local TAB_ORDER = 15
+    local SCAN_INTERVAL = 0.15
 
-local SECTION_NAME = "Mob Farm"
+    ------------------------------------------------------------
+    -- Mob list
+    ------------------------------------------------------------
 
-local DEFAULT_TWEEN_SPEED = 80
-local MIN_TWEEN_SPEED = 1
-local MAX_TWEEN_SPEED = 500
+    local MobNames = {
+        "Buni",
+        "DireBuni",
+        "PlainsWoof",
+        "Mageling",
+        "Croakernaut",
+        "LordFrogg",
+        "Bulfrogg",
+        "Toadzerker",
+        "Dragigator",
+        "Lilimonster",
+        "Drone",
+        "Bumblz",
+        "Bomber",
+        "QueenBumblz",
+        "Puffball",
+        "SporeBossMan",
+        "Sporeling",
+        "Lord Stratos Altolodon",
+        "Whirlray",
+        "Caci",
+        "Slizard",
+        "CaciKing",
+        "StoneCleric",
+        "VoidRoot",
+        "Bowldur",
+        "BastionGuardian",
+        "StoneArcher",
+        "StoneKnight",
+        "CrazyHare",
+        "BaniPrince",
+        "RedRockHare",
+        "Batty",
+        "GlacialSnapper",
+        "WinterWoof",
+        "Delta-Spider",
+        "Stalker",
+        "Scow",
+        "SteamGolem",
+        "Omega-Batty",
+        "DeepSpider",
+        "BrainBurner",
+        "Proto-Mungus",
+        "Easter",
+        "Grumpkin",
+        "THEHALLOWSOUL"
+    }
 
-local SCAN_INTERVAL = 0.15
+    ------------------------------------------------------------
+    -- Lookup
+    ------------------------------------------------------------
 
---//========================================================
---// MOB LIST
---//========================================================
+    local MobLookup = {}
 
-local MobNames = {
-    "Buni",
-    "DireBuni",
-    "PlainsWoof",
-    "Mageling",
-    "Croakernaut",
-    "LordFrogg",
-    "Bulfrogg",
-    "Toadzerker",
-    "Dragigator",
-    "Lilimonster",
-    "Drone",
-    "Bumblz",
-    "Bomber",
-    "QueenBumblz",
-    "Puffball",
-    "SporeBossMan",
-    "Sporeling",
-    "Lord Stratos Altolodon",
-    "Whirlray",
-    "Caci",
-    "Slizard",
-    "CaciKing",
-    "StoneCleric",
-    "VoidRoot",
-    "Bowldur",
-    "BastionGuardian",
-    "StoneArcher",
-    "StoneKnight",
-    "CrazyHare",
-    "BaniPrince",
-    "RedRockHare",
-    "Batty",
-    "GlacialSnapper",
-    "WinterWoof",
-    "Delta-Spider",
-    "Stalker",
-    "Scow",
-    "SteamGolem",
-    "Omega-Batty",
-    "DeepSpider",
-    "BrainBurner",
-    "Proto-Mungus",
-    "Easter",
-    "Grumpkin",
-    "THEHALLOWSOUL",
-}
-
-local MobLookup = {}
-
-for _, MobName in ipairs(MobNames) do
-    MobLookup[MobName] = true
-end
-
---//========================================================
---// STATE
---//========================================================
-
-local Running = false
-
-local TweenSpeed = DEFAULT_TWEEN_SPEED
-
-local CurrentTween = nil
-local CurrentTarget = nil
-
-local SelectedMobs = {}
-
-local StartButton = nil
-local StatusLabel = nil
-
--- Select all mobs by default.
-for _, MobName in ipairs(MobNames) do
-    SelectedMobs[MobName] = true
-end
-
---//========================================================
---// CHARACTER
---//========================================================
-
-local function GetCharacter()
-    return LocalPlayer.Character
-end
-
-local function GetRoot()
-    local Character = GetCharacter()
-
-    if not Character then
-        return nil
+    for _, mobName in ipairs(MobNames) do
+        MobLookup[mobName] = true
     end
 
-    return Character:FindFirstChild("HumanoidRootPart")
-end
+    ------------------------------------------------------------
+    -- State
+    ------------------------------------------------------------
 
---//========================================================
---// MOB TYPE
---//========================================================
+    local Running = false
+    local TweenSpeed = DEFAULT_SPEED
 
--- Supports:
---
--- Buni
--- Buni07
--- Buni42
---
--- Omega-Batty
--- Omega-Batty05
---
--- etc.
+    local CurrentTween = nil
+    local CurrentTarget = nil
 
-local function GetMobType(Object)
-    if not Object then
-        return nil
+    local SelectedMobs = {}
+
+    -- Все мобы включены по умолчанию.
+    for _, mobName in ipairs(MobNames) do
+        SelectedMobs[mobName] = true
     end
 
-    if not Object:IsA("BasePart") then
-        return nil
+    ------------------------------------------------------------
+    -- Character helpers
+    ------------------------------------------------------------
+
+    local function GetCharacter()
+        return LocalPlayer.Character
     end
 
-    -- Exact name.
-    if MobLookup[Object.Name] then
-        return Object.Name
-    end
+    local function GetRoot()
+        local Character = GetCharacter()
 
-    -- Remove trailing numbers.
-    local BaseName = Object.Name:gsub("%d+$", "")
-
-    if MobLookup[BaseName] then
-        return BaseName
-    end
-
-    return nil
-end
-
---//========================================================
---// MOB VALIDATION
---//========================================================
-
-local function IsValidMob(Object)
-    if not Object then
-        return false
-    end
-
-    if not Object.Parent then
-        return false
-    end
-
-    local MobType = GetMobType(Object)
-
-    if not MobType then
-        return false
-    end
-
-    if not SelectedMobs[MobType] then
-        return false
-    end
-
-    local Hitbox = Object:FindFirstChild("Hitbox")
-
-    if not Hitbox then
-        return false
-    end
-
-    if not Hitbox:IsA("BasePart") then
-        return false
-    end
-
-    return true
-end
-
---//========================================================
---// FIND CLOSEST MOB
---//========================================================
-
-local function FindClosestMob()
-    local Root = GetRoot()
-
-    if not Root then
-        return nil
-    end
-
-    local ClosestMob = nil
-    local ClosestDistance = math.huge
-
-    for _, Object in ipairs(workspace:GetDescendants()) do
-        if IsValidMob(Object) then
-            local Hitbox = Object:FindFirstChild("Hitbox")
-
-            if Hitbox and Hitbox:IsA("BasePart") then
-                local Distance = (
-                    Root.Position - Hitbox.Position
-                ).Magnitude
-
-                if Distance < ClosestDistance then
-                    ClosestDistance = Distance
-                    ClosestMob = Object
-                end
-            end
+        if not Character then
+            return nil
         end
+
+        return Character:FindFirstChild("HumanoidRootPart")
     end
 
-    return ClosestMob
-end
+    ------------------------------------------------------------
+    -- Mob name handling
+    ------------------------------------------------------------
 
---//========================================================
---// TWEEN CONTROL
---//========================================================
+    local function GetMobType(Name)
+        if not Name then
+            return nil
+        end
 
-local function StopTween()
-    if CurrentTween then
-        pcall(function()
-            CurrentTween:Cancel()
-        end)
+        -- Сначала точное совпадение.
+        if MobLookup[Name] then
+            return Name
+        end
 
-        CurrentTween = nil
-    end
-end
+        -- Убираем случайные цифры в конце:
+        -- Buni07       -> Buni
+        -- Buni42       -> Buni
+        -- Omega-Batty05 -> Omega-Batty
+        local BaseName = Name:gsub("%d+$", "")
 
---//========================================================
---// STATUS
---//========================================================
+        if MobLookup[BaseName] then
+            return BaseName
+        end
 
-local function SetStatus(Text)
-    if StatusLabel then
-        StatusLabel:SetText("Status: " .. Text)
-    end
-end
-
---//========================================================
---// TWEEN TO MOB
---//========================================================
-
-local function TweenToMob(Mob)
-    if not Running then
-        return false
+        return nil
     end
 
-    if not IsValidMob(Mob) then
-        return false
+    ------------------------------------------------------------
+    -- Mob validation
+    ------------------------------------------------------------
+
+    local function GetHitbox(Mob)
+        if not Mob or not Mob.Parent then
+            return nil
+        end
+
+        local Hitbox = Mob:FindFirstChild("Hitbox")
+
+        if not Hitbox then
+            return nil
+        end
+
+        if not Hitbox:IsA("BasePart") then
+            return nil
+        end
+
+        return Hitbox
     end
 
-    local Root = GetRoot()
+    local function IsValidMob(Mob)
+        if not Mob then
+            return false
+        end
 
-    if not Root then
-        return false
-    end
+        if not Mob.Parent then
+            return false
+        end
 
-    local Hitbox = Mob:FindFirstChild("Hitbox")
+        if not Mob:IsA("BasePart") then
+            return false
+        end
 
-    if not Hitbox or not Hitbox:IsA("BasePart") then
-        return false
-    end
+        local MobType = GetMobType(Mob.Name)
 
-    CurrentTarget = Mob
+        if not MobType then
+            return false
+        end
 
-    local Distance = (
-        Root.Position - Hitbox.Position
-    ).Magnitude
+        if not SelectedMobs[MobType] then
+            return false
+        end
 
-    -- Already at target.
-    if Distance <= 2 then
+        local Hitbox = GetHitbox(Mob)
+
+        if not Hitbox then
+            return false
+        end
+
         return true
     end
 
-    StopTween()
+    ------------------------------------------------------------
+    -- Find closest mob
+    ------------------------------------------------------------
 
-    local Duration = math.max(
-        Distance / TweenSpeed,
-        0.05
-    )
+    local function FindClosestMob()
+        local Root = GetRoot()
 
-    CurrentTween = TweenService:Create(
-        Root,
+        if not Root then
+            return nil
+        end
 
-        TweenInfo.new(
+        local ClosestMob = nil
+        local ClosestDistance = math.huge
+
+        for _, Object in ipairs(workspace:GetDescendants()) do
+
+            if IsValidMob(Object) then
+
+                local Hitbox = GetHitbox(Object)
+
+                if Hitbox then
+                    local Distance = (Root.Position - Hitbox.Position).Magnitude
+
+                    if Distance < ClosestDistance then
+                        ClosestDistance = Distance
+                        ClosestMob = Object
+                    end
+                end
+            end
+        end
+
+        return ClosestMob
+    end
+
+    ------------------------------------------------------------
+    -- Stop current tween
+    ------------------------------------------------------------
+
+    local function StopTween()
+        if CurrentTween then
+            pcall(function()
+                CurrentTween:Cancel()
+            end)
+        end
+
+        CurrentTween = nil
+    end
+
+    ------------------------------------------------------------
+    -- Tween to target
+    ------------------------------------------------------------
+
+    local function TweenToMob(Mob)
+
+        if not Running then
+            return
+        end
+
+        if not IsValidMob(Mob) then
+            return
+        end
+
+        local Root = GetRoot()
+
+        if not Root then
+            return
+        end
+
+        local Hitbox = GetHitbox(Mob)
+
+        if not Hitbox then
+            return
+        end
+
+        CurrentTarget = Mob
+
+        local Distance = (Root.Position - Hitbox.Position).Magnitude
+
+        -- Уже практически на месте.
+        if Distance <= 1 then
+            CurrentTarget = nil
+            return
+        end
+
+        local Duration = Distance / math.max(TweenSpeed, 1)
+
+        StopTween()
+
+        local TweenInfoData = TweenInfo.new(
             Duration,
             Enum.EasingStyle.Linear,
             Enum.EasingDirection.Out
-        ),
+        )
 
-        {
-            CFrame = Hitbox.CFrame
-        }
-    )
+        CurrentTween = TweenService:Create(
+            Root,
+            TweenInfoData,
+            {
+                CFrame = Hitbox.CFrame
+            }
+        )
 
-    local Completed = false
-    local Connection = nil
+        local Tween = CurrentTween
 
-    Connection = CurrentTween.Completed:Connect(function()
-        Completed = true
+        local Connection
+
+        Connection = Tween.Completed:Connect(function()
+            if Connection then
+                Connection:Disconnect()
+                Connection = nil
+            end
+
+            if CurrentTween == Tween then
+                CurrentTween = nil
+            end
+
+            if CurrentTarget == Mob then
+                CurrentTarget = nil
+            end
+        end)
+
+        Tween:Play()
+
+        -- Следим за исчезновением цели/Hitbox/персонажа.
+        while Running and CurrentTween == Tween do
+
+            local Character = GetCharacter()
+            local CurrentRoot = Character and Character:FindFirstChild("HumanoidRootPart")
+
+            if not Character
+                or not Character.Parent
+                or not CurrentRoot
+                or not CurrentRoot.Parent
+            then
+                Tween:Cancel()
+                break
+            end
+
+            if not Mob
+                or not Mob.Parent
+            then
+                Tween:Cancel()
+                break
+            end
+
+            local CurrentHitbox = GetHitbox(Mob)
+
+            if not CurrentHitbox
+                or not CurrentHitbox.Parent
+            then
+                Tween:Cancel()
+                break
+            end
+
+            if not SelectedMobs[GetMobType(Mob.Name)] then
+                Tween:Cancel()
+                break
+            end
+
+            task.wait(0.05)
+        end
 
         if Connection then
             Connection:Disconnect()
-            Connection = nil
-        end
-    end)
-
-    CurrentTween:Play()
-
-    -- Watch target while tweening.
-    while Running and not Completed do
-        task.wait(0.05)
-
-        -- Mob disappeared.
-        if not Mob.Parent then
-            StopTween()
-            break
         end
 
-        -- Hitbox disappeared.
-        Hitbox = Mob:FindFirstChild("Hitbox")
-
-        if not Hitbox or not Hitbox:IsA("BasePart") then
-            StopTween()
-            break
+        if CurrentTween == Tween then
+            CurrentTween = nil
         end
 
-        -- Character disappeared/reset.
-        Root = GetRoot()
-
-        if not Root then
-            StopTween()
-            break
+        if CurrentTarget == Mob then
+            CurrentTarget = nil
         end
     end
 
-    if Connection then
-        Connection:Disconnect()
-        Connection = nil
-    end
+    ------------------------------------------------------------
+    -- Farm loop
+    ------------------------------------------------------------
 
-    CurrentTween = nil
-    CurrentTarget = nil
+    task.spawn(function()
 
-    return Completed
-end
-
---//========================================================
---// FARM LOOP
---//========================================================
-
-local function FarmLoop()
-    while Running do
-
-        local Character = GetCharacter()
-        local Root = GetRoot()
-
-        if not Character or not Root then
-            SetStatus("Waiting for character...")
-            task.wait(0.5)
-
-            continue
-        end
-
-        local Target = FindClosestMob()
-
-        if Target then
-
-            CurrentTarget = Target
-
-            local MobType = GetMobType(Target)
-
-            SetStatus(
-                "Farming: " .. tostring(MobType)
-            )
-
-            TweenToMob(Target)
+        while true do
 
             if Running then
-                task.wait(0.05)
+
+                local Target = FindClosestMob()
+
+                if Target then
+                    TweenToMob(Target)
+                else
+                    task.wait(SCAN_INTERVAL)
+                end
+
+            else
+                task.wait(0.1)
             end
 
-        else
-
-            CurrentTarget = nil
-
-            SetStatus(
-                "Searching for selected mobs..."
-            )
-
-            task.wait(SCAN_INTERVAL)
-        end
-    end
-
-    StopTween()
-
-    CurrentTarget = nil
-
-    SetStatus("Stopped")
-end
-
---//========================================================
---// PUBLIC API
---//========================================================
-
-function BuniFarm.Start()
-
-    if Running then
-        return
-    end
-
-    Running = true
-
-    if StartButton then
-        StartButton:SetText("Stop BuniFarm")
-    end
-
-    SetStatus("Starting...")
-
-    task.spawn(FarmLoop)
-end
-
-function BuniFarm.Stop()
-
-    Running = false
-
-    StopTween()
-
-    CurrentTarget = nil
-
-    if StartButton then
-        StartButton:SetText("Start BuniFarm")
-    end
-
-    SetStatus("Stopped")
-end
-
-function BuniFarm.IsRunning()
-    return Running
-end
-
---// Speed
-function BuniFarm.SetSpeed(Speed)
-
-    Speed = tonumber(Speed)
-
-    if not Speed then
-        return
-    end
-
-    TweenSpeed = math.clamp(
-        Speed,
-        MIN_TWEEN_SPEED,
-        MAX_TWEEN_SPEED
-    )
-end
-
-function BuniFarm.GetSpeed()
-    return TweenSpeed
-end
-
---// Single mob toggle
-function BuniFarm.SetMobEnabled(MobName, Enabled)
-
-    if not MobLookup[MobName] then
-        return
-    end
-
-    SelectedMobs[MobName] = Enabled == true
-end
-
---// MultiSelect setter
-function BuniFarm.SetSelectedMobs(Values)
-
-    table.clear(SelectedMobs)
-
-    if type(Values) ~= "table" then
-        return
-    end
-
-    for _, MobName in ipairs(Values) do
-
-        if MobLookup[MobName] then
-            SelectedMobs[MobName] = true
         end
 
-    end
-end
+    end)
 
---// Get selected mobs as an array.
-function BuniFarm.GetSelectedMobs()
+    ------------------------------------------------------------
+    -- Public controls
+    ------------------------------------------------------------
 
-    local Result = {}
-
-    for _, MobName in ipairs(MobNames) do
-
-        if SelectedMobs[MobName] then
-            table.insert(Result, MobName)
+    local function Start()
+        if Running then
+            return
         end
 
+        Running = true
     end
 
-    return Result
-end
+    local function Stop()
+        Running = false
 
-function BuniFarm.GetCurrentTarget()
-    return CurrentTarget
-end
+        StopTween()
 
-function BuniFarm.GetMobNames()
-    return table.clone(MobNames)
-end
-
---//========================================================
---// CREATE UI
---//========================================================
-
-function BuniFarm.CreateUI(Section)
-
-    if not Section then
-        return
+        CurrentTarget = nil
     end
 
-    -- Header
-    Section:AddLabel({
+    ------------------------------------------------------------
+    -- UI
+    ------------------------------------------------------------
+
+    local Tab = Window:CreateTab({
+        Name = TAB_NAME,
+        Icon = TAB_ICON,
+        Order = (meta and meta.Order) or 30,
+    })
+
+    ------------------------------------------------------------
+    -- Main section
+    ------------------------------------------------------------
+
+    local Main = Tab:CreateSection({
+        Name = "Mob Farm"
+    })
+
+    Main:AddLabel({
         Text = "BuniFarm"
     })
 
-    Section:AddLabel({
-        Text = "Automatically farms selected mobs"
+    Main:AddLabel({
+        Text = "Moves to selected mob Hitboxes"
     })
 
-    -- Start / Stop
-    StartButton = Section:AddButton({
-        Text = "Start BuniFarm",
+    Main:AddSeparator()
+
+    ------------------------------------------------------------
+    -- Enable / Disable
+    ------------------------------------------------------------
+
+    Main:AddToggle({
+        Text = "Enable Farm",
+        Default = false,
+
+        Callback = function(Value)
+
+            if Value then
+                Start()
+            else
+                Stop()
+            end
+
+        end
+    })
+
+    ------------------------------------------------------------
+    -- Speed
+    ------------------------------------------------------------
+
+    Main:AddSlider({
+        Text = "Tween Speed",
+        Min = MIN_SPEED,
+        Max = MAX_SPEED,
+        Default = DEFAULT_SPEED,
+        Increment = 1,
+
+        Callback = function(Value)
+            TweenSpeed = Value
+
+            -- Чтобы изменение скорости сразу применилось
+            -- к текущему перемещению.
+            if Running and CurrentTarget then
+                local Target = CurrentTarget
+
+                StopTween()
+
+                task.defer(function()
+                    if Running and Target and Target.Parent then
+                        TweenToMob(Target)
+                    end
+                end)
+            end
+        end
+    })
+
+    ------------------------------------------------------------
+    -- Mob selection
+    ------------------------------------------------------------
+
+    local MobSection = Tab:CreateSection({
+        Name = "Mob Selection"
+    })
+
+    MobSection:AddDropdown({
+        Text = "Mob Types",
+
+        Options = MobNames,
+
+        MultiSelect = true,
+
+        Callback = function(Value)
+
+            -- В твоём Dropdown MultiSelect callback
+            -- возвращает массив выбранных значений.
+            SelectedMobs = {}
+
+            for _, MobName in ipairs(Value) do
+                if MobLookup[MobName] then
+                    SelectedMobs[MobName] = true
+                end
+            end
+
+            -- Если текущая цель больше не выбрана,
+            -- немедленно прекращаем её tween.
+            if CurrentTarget then
+                local CurrentType = GetMobType(CurrentTarget.Name)
+
+                if not CurrentType or not SelectedMobs[CurrentType] then
+                    StopTween()
+                    CurrentTarget = nil
+                end
+            end
+
+        end
+    })
+
+    ------------------------------------------------------------
+    -- Controls
+    ------------------------------------------------------------
+
+    local Controls = Tab:CreateSection({
+        Name = "Controls"
+    })
+
+    Controls:AddButton({
+        Text = "Start",
+        Callback = function()
+            Start()
+        end
+    })
+
+    Controls:AddButton({
+        Text = "Stop",
+        Callback = function()
+            Stop()
+        end
+    })
+
+    ------------------------------------------------------------
+    -- Keybind
+    ------------------------------------------------------------
+
+    Controls:AddKeybind({
+        Text = "Toggle Farm",
+        Default = Enum.KeyCode.F,
 
         Callback = function()
 
             if Running then
-                BuniFarm.Stop()
+                Stop()
             else
-                BuniFarm.Start()
+                Start()
             end
 
         end
     })
 
-    Section:AddSeparator({
-        Text = "Target Selection"
+    ------------------------------------------------------------
+    -- Status
+    ------------------------------------------------------------
+
+    local Status = Tab:CreateSection({
+        Name = "Status"
     })
 
-    -- IMPORTANT:
-    -- This is strictly compatible with the uploaded
-    -- Dropdown implementation.
-    --
-    -- MultiSelect callback returns:
-    --
-    -- {
-    --     "Buni",
-    --     "DireBuni",
-    --     "Puffball"
-    -- }
-    --
-    -- Default must also be an array.
+    local StatusLabel = Status:AddLabel({
+        Text = "Status: OFF"
+    })
 
-    Section:AddDropdown({
+    ------------------------------------------------------------
+    -- Status updater
+    ------------------------------------------------------------
 
-        Text = "Mob Types",
+    task.spawn(function()
 
-        Values = MobNames,
+        while true do
 
-        MultiSelect = true,
+            local Text
 
-        Default = MobNames,
+            if not Running then
 
-        Callback = function(Values)
+                Text = "Status: OFF"
 
-            BuniFarm.SetSelectedMobs(Values)
+            elseif CurrentTarget then
+
+                local MobType = GetMobType(CurrentTarget.Name)
+
+                if MobType then
+                    Text = "Status: FARMING | " .. MobType
+                else
+                    Text = "Status: FARMING"
+                end
+
+            else
+
+                Text = "Status: SEARCHING"
+
+            end
+
+            pcall(function()
+                StatusLabel:SetText(Text)
+            end)
+
+            task.wait(0.1)
 
         end
-    })
 
-    Section:AddSeparator({
-        Text = "Movement"
-    })
+    end)
 
-    Section:AddSlider({
-
-        Text = "Tween Speed",
-
-        Min = MIN_TWEEN_SPEED,
-
-        Max = MAX_TWEEN_SPEED,
-
-        Default = DEFAULT_TWEEN_SPEED,
-
-        Increment = 1,
-
-        Callback = function(Value)
-
-            BuniFarm.SetSpeed(Value)
-
-        end
-    })
-
-    StatusLabel = Section:AddLabel({
-        Text = "Status: Stopped"
-    })
-
-    return BuniFarm
 end
-
---//========================================================
---// CREATE TAB
---//========================================================
-
-function BuniFarm.CreateTab(Window)
-
-    if not Window then
-        return nil
-    end
-
-    local Tab = Window:CreateTab({
-
-        Name = TAB_NAME,
-
-        Icon = TAB_ICON,
-
-        Order = TAB_ORDER
-    })
-
-    local Section = Tab:CreateSection({
-
-        Name = SECTION_NAME
-    })
-
-    BuniFarm.CreateUI(Section)
-
-    return Tab
-end
-
-return BuniFarm
