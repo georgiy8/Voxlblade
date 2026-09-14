@@ -7,7 +7,7 @@ return function(Window, meta)
     local Tab = Window:CreateTab({
         Name = "BuniFarm",
         Icon = "🐰",
-        Order = (meta and meta.Order) or 30,
+        Order = (meta and meta.Order) or 15,
     })
 
     ------------------------------------------------------------
