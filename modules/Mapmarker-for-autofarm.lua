@@ -220,7 +220,9 @@ return function(Window, meta)
     local CameraHeight = 60                    -- studs ABOVE BaseElevation, not an absolute world Y
     local MinHeight, MaxHeight = 15, 400
 
-    local PanMouseHeld = false
+    local RightMouseHeld = false
+    local PanStartMouse = nil
+    local PanStartCameraCenter = nil
     local EHeld = false
     local AltHeld = false
     local CtrlHeld = false
@@ -646,7 +648,7 @@ table.insert(Connections, UserInputService.InputBegan:Connect(function(Input, Pr
             return
         end
 
-        -- Normal Left Click = add a point.
+        -- Normal Left Click = add a point immediately.
         if not Processed then
             local HitPosition = RaycastFromMouse()
 
@@ -655,11 +657,12 @@ table.insert(Connections, UserInputService.InputBegan:Connect(function(Input, Pr
             end
         end
 
-    elseif Input.UserInputType == Enum.UserInputType.MouseButton3 then
+    elseif Input.UserInputType == Enum.UserInputType.MouseButton2 then
 
-        -- Middle Mouse Button = Dota 2 style map pan.
-        PanMouseHeld = true
-
+        -- Right Mouse Button = pan the map.
+        RightMouseHeld = true
+        PanStartMouse = UserInputService:GetMouseLocation()
+        PanStartCameraCenter = CameraCenter
     end
 
 end))
@@ -672,12 +675,14 @@ end))
 
     if Input.UserInputType == Enum.UserInputType.MouseMovement then
 
-        if PanMouseHeld then
-            local Delta = Input.Delta
+        if RightMouseHeld and PanStartMouse and PanStartCameraCenter then
+            local MouseLocation = UserInputService:GetMouseLocation()
+            local Delta = MouseLocation - PanStartMouse
+
             local PanScale = CameraHeight * 0.0025
 
             CameraCenter =
-                CameraCenter
+                PanStartCameraCenter
                 - Vector3.new(Delta.X, 0, Delta.Y) * PanScale
 
             UpdateCameraCFrame()
@@ -706,7 +711,7 @@ end))
     end
 
 end))
-
+    --------------------------------------------------------
     table.insert(Connections, UserInputService.InputEnded:Connect(function(Input)
 
         if Input.KeyCode == Enum.KeyCode.E then
@@ -721,17 +726,16 @@ end))
             CtrlHeld = false
         end
 
-        if Input.UserInputType == Enum.UserInputType.MouseButton3 then
-            PanMouseHeld = false
-        end
-
-        if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if Input.UserInputType == Enum.UserInputType.MouseButton2 then
+            RightMouseHeld = false
+            PanStartMouse = nil
+            PanStartCameraCenter = nil
+        elseif Input.UserInputType == Enum.UserInputType.MouseButton1 then
             DraggingIndex = nil
         end
 
     end))
 
-    --------------------------------------------------------
     -- GUI
     --------------------------------------------------------
 
