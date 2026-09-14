@@ -5,7 +5,7 @@ local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
 --========================================================--
--- Configuration
+-- MOB LIST
 --========================================================--
 
 local MOB_NAMES = {
@@ -58,12 +58,12 @@ local MOB_NAMES = {
 
 local MobLookup = {}
 
-for _, name in ipairs(MOB_NAMES) do
-MobLookup[name] = true
+for _, mobName in ipairs(MOB_NAMES) do
+MobLookup[mobName] = true
 end
 
 --========================================================--
--- State
+-- STATE
 --========================================================--
 
 local FarmEnabled = false
@@ -78,12 +78,12 @@ local StopDistance = 2
 
 local SelectedMobs = {}
 
-local TargetScanDelay = 0.10
-local NoTargetDelay = 0.15
-local CharacterWaitDelay = 0.25
+local TargetSearchDelay = 0.05
+local NoTargetDelay = 0.10
+local CharacterWaitDelay = 0.20
 
 --========================================================--
--- Character
+-- CHARACTER
 --========================================================--
 
 local function getCharacter()
@@ -109,6 +109,19 @@ return nil
 
 end
 
+local function getHumanoid()
+local character = getCharacter()
+
+```
+if not character then
+    return nil
+end
+
+return character:FindFirstChildOfClass("Humanoid")
+```
+
+end
+
 local function isCharacterValid()
 local character = getCharacter()
 
@@ -117,10 +130,14 @@ if not character then
     return false
 end
 
-local humanoid = character:FindFirstChildOfClass("Humanoid")
 local root = character:FindFirstChild("HumanoidRootPart")
+local humanoid = character:FindFirstChildOfClass("Humanoid")
 
-if not humanoid or not root then
+if not root or not root:IsA("BasePart") then
+    return false
+end
+
+if not humanoid then
     return false
 end
 
@@ -134,7 +151,7 @@ return true
 end
 
 --========================================================--
--- Mob name handling
+-- MOB NAME
 --========================================================--
 
 local function stripTrailingDigits(name)
@@ -152,26 +169,44 @@ return stripTrailingDigits(instance.Name)
 
 end
 
+--========================================================--
+-- MOB DETECTION
+----------------
+
+## -- Mob structure:
+
+-- Buni07        <- MeshPart
+-- └── Hitbox    <- MeshPart
+----------------------------
+
+-- Same structure applies to other mobs.
+--========================================================--
+
 local function isMob(instance)
 if not instance then
 return false
 end
 
 ```
+-- The actual mob body is a MeshPart/BasePart.
 if not instance:IsA("BasePart") then
     return false
 end
 
 local baseName = getBaseMobName(instance)
 
-return baseName ~= nil and MobLookup[baseName] == true
+if not baseName then
+    return false
+end
+
+if not MobLookup[baseName] then
+    return false
+end
+
+return true
 ```
 
 end
-
---========================================================--
--- Hitbox
---========================================================--
 
 local function getHitbox(mob)
 if not mob then
@@ -183,6 +218,7 @@ if not mob.Parent then
     return nil
 end
 
+-- Hitbox is a MeshPart and is a direct child.
 local hitbox = mob:FindFirstChild("Hitbox")
 
 if hitbox and hitbox:IsA("BasePart") then
@@ -194,13 +230,17 @@ return nil
 
 end
 
-local function isTargetValid(mob, hitbox)
-if not mob or not mob.Parent then
+local function isValidMob(mob)
+if not mob then
 return false
 end
 
 ```
-if not hitbox or not hitbox.Parent then
+if not mob.Parent then
+    return false
+end
+
+if not mob:IsA("BasePart") then
     return false
 end
 
@@ -208,7 +248,22 @@ if not isMob(mob) then
     return false
 end
 
-if getHitbox(mob) ~= hitbox then
+return getHitbox(mob) ~= nil
+```
+
+end
+
+local function isValidHitbox(hitbox)
+if not hitbox then
+return false
+end
+
+```
+if not hitbox.Parent then
+    return false
+end
+
+if not hitbox:IsA("BasePart") then
     return false
 end
 
@@ -218,28 +273,7 @@ return true
 end
 
 --========================================================--
--- Distance
---========================================================--
-
-local function getDistanceFromPlayer(part)
-local root = getRoot()
-
-```
-if not root then
-    return math.huge
-end
-
-if not part or not part.Parent then
-    return math.huge
-end
-
-return (root.Position - part.Position).Magnitude
-```
-
-end
-
---========================================================--
--- Selected mobs
+-- SELECTED MOBS
 --========================================================--
 
 local function getSelectedLookup(value)
@@ -262,19 +296,36 @@ return selected
 end
 
 --========================================================--
--- Target search
+-- DISTANCE
 --========================================================--
 
-local function findNearestMob(selected)
-if not selected then
+local function getDistanceFromPlayer(part)
+local root = getRoot()
+
+```
+if not root then
+    return math.huge
+end
+
+if not isValidHitbox(part) then
+    return math.huge
+end
+
+return (root.Position - part.Position).Magnitude
+```
+
+end
+
+--========================================================--
+-- FIND NEAREST MOB
+--========================================================--
+
+local function findNearestMob()
+if next(SelectedMobs) == nil then
 return nil
 end
 
 ```
-if next(selected) == nil then
-    return nil
-end
-
 local root = getRoot()
 
 if not root then
@@ -286,13 +337,17 @@ local nearestDistance = math.huge
 
 for _, instance in ipairs(Workspace:GetDescendants()) do
     if isMob(instance) then
+
         local baseName = getBaseMobName(instance)
 
-        if selected[baseName] then
+        if baseName and SelectedMobs[baseName] then
+
             local hitbox = getHitbox(instance)
 
             if hitbox then
-                local distance = (root.Position - hitbox.Position).Magnitude
+
+                local distance =
+                    (root.Position - hitbox.Position).Magnitude
 
                 if distance < nearestDistance then
                     nearestDistance = distance
@@ -309,7 +364,50 @@ return nearestMob
 end
 
 --========================================================--
--- Tween control
+-- CURRENT TARGET VALIDATION
+--========================================================--
+
+local function isCurrentTargetValid(mob, hitbox)
+if not FarmEnabled then
+return false
+end
+
+```
+if not isCharacterValid() then
+    return false
+end
+
+if not isValidMob(mob) then
+    return false
+end
+
+if not isValidHitbox(hitbox) then
+    return false
+end
+
+local currentHitbox = getHitbox(mob)
+
+if currentHitbox ~= hitbox then
+    return false
+end
+
+local baseName = getBaseMobName(mob)
+
+if not baseName then
+    return false
+end
+
+if not SelectedMobs[baseName] then
+    return false
+end
+
+return true
+```
+
+end
+
+--========================================================--
+-- TWEEN CONTROL
 --========================================================--
 
 local function stopTween()
@@ -329,7 +427,7 @@ end
 
 end
 
-local function createTargetTween(hitbox)
+local function createTween(hitbox)
 local root = getRoot()
 
 ```
@@ -337,20 +435,30 @@ if not root then
     return nil
 end
 
-if not hitbox or not hitbox.Parent then
+if not isValidHitbox(hitbox) then
     return nil
 end
 
-local distance = (root.Position - hitbox.Position).Magnitude
+local distance =
+    (root.Position - hitbox.Position).Magnitude
 
 if distance <= StopDistance then
     return nil
 end
 
-local speed = math.max(1, tonumber(TweenSpeed) or 50)
+local speed = tonumber(TweenSpeed) or 50
+
+if speed < 1 then
+    speed = 1
+end
+
 local duration = distance / speed
 
-local tween = TweenService:Create(
+if duration < 0.01 then
+    duration = 0.01
+end
+
+return TweenService:Create(
     root,
     TweenInfo.new(
         duration,
@@ -361,23 +469,17 @@ local tween = TweenService:Create(
         CFrame = hitbox.CFrame
     }
 )
-
-return tween
 ```
 
 end
 
-local function tweenToTarget(mob, hitbox)
+local function tweenToHitbox(mob, hitbox)
 if not FarmEnabled then
 return false
 end
 
 ```
-if not isCharacterValid() then
-    return false
-end
-
-if not isTargetValid(mob, hitbox) then
+if not isCurrentTargetValid(mob, hitbox) then
     return false
 end
 
@@ -387,7 +489,8 @@ if not root then
     return false
 end
 
-local distance = (root.Position - hitbox.Position).Magnitude
+local distance =
+    (root.Position - hitbox.Position).Magnitude
 
 if distance <= StopDistance then
     return true
@@ -395,7 +498,7 @@ end
 
 stopTween()
 
-local tween = createTargetTween(hitbox)
+local tween = createTween(hitbox)
 
 if not tween then
     return true
@@ -405,13 +508,13 @@ ActiveTween = tween
 ActiveTarget = mob
 ActiveHitbox = hitbox
 
-local finished = false
+local completed = false
 local cancelled = false
 
 local connection
 
 connection = tween.Completed:Connect(function()
-    finished = true
+    completed = true
 
     if connection then
         connection:Disconnect()
@@ -421,13 +524,14 @@ end)
 
 tween:Play()
 
-while FarmEnabled and not finished do
+while FarmEnabled and not completed do
+
     if not isCharacterValid() then
         cancelled = true
         break
     end
 
-    if not isTargetValid(mob, hitbox) then
+    if not isCurrentTargetValid(mob, hitbox) then
         cancelled = true
         break
     end
@@ -486,7 +590,7 @@ return true
 end
 
 --========================================================--
--- Farm control
+-- FARM LOOP
 --========================================================--
 
 local function stopFarm()
@@ -509,16 +613,17 @@ FarmEnabled = true
 FarmRunning = true
 
 task.spawn(function()
+
     while FarmEnabled do
 
-        -- Character not ready / dead
+        -- Character check
         if not isCharacterValid() then
             stopTween()
             task.wait(CharacterWaitDelay)
             continue
         end
 
-        -- No selected mobs
+        -- Mob selection check
         if next(SelectedMobs) == nil then
             stopTween()
             task.wait(NoTargetDelay)
@@ -526,7 +631,7 @@ task.spawn(function()
         end
 
         -- Find nearest selected mob
-        local mob = findNearestMob(SelectedMobs)
+        local mob = findNearestMob()
 
         if not mob then
             stopTween()
@@ -534,25 +639,25 @@ task.spawn(function()
             continue
         end
 
-        -- Get current hitbox
+        -- Get MeshPart Hitbox
         local hitbox = getHitbox(mob)
 
         if not hitbox then
-            task.wait(TargetScanDelay)
+            task.wait(TargetSearchDelay)
             continue
         end
 
-        -- Save current target
+        -- Save target
         ActiveTarget = mob
         ActiveHitbox = hitbox
 
-        -- Move toward target
-        tweenToTarget(mob, hitbox)
+        -- Tween to the Hitbox
+        tweenToHitbox(mob, hitbox)
 
-        -- Target may have disappeared during tween.
-        -- Loop immediately searches for another one.
+        -- If target disappeared / died / changed,
+        -- immediately search for another one.
         if FarmEnabled then
-            task.wait(TargetScanDelay)
+            task.wait(TargetSearchDelay)
         end
     end
 
@@ -565,7 +670,7 @@ end)
 end
 
 --========================================================--
--- GUI
+-- GUI MODULE
 --========================================================--
 
 return function(Window, meta)
@@ -574,11 +679,11 @@ return function(Window, meta)
 local Tab = Window:CreateTab({
     Name = "BuniFarm",
     Icon = "🐰",
-    Order = (meta and meta.Order) or 30,
+    Order = (meta and meta.Order) or 15,
 })
 
 --====================================================--
--- Farm section
+-- FARM
 --====================================================--
 
 local FarmSection = Tab:CreateSection({
@@ -588,6 +693,7 @@ local FarmSection = Tab:CreateSection({
 FarmSection:AddToggle({
     Text = "Enable Farm",
     Default = false,
+
     Callback = function(Value)
         if Value then
             startFarm()
@@ -599,6 +705,7 @@ FarmSection:AddToggle({
 
 FarmSection:AddButton({
     Text = "Start Farm",
+
     Callback = function()
         startFarm()
     end
@@ -606,13 +713,14 @@ FarmSection:AddButton({
 
 FarmSection:AddButton({
     Text = "Stop Farm",
+
     Callback = function()
         stopFarm()
     end
 })
 
 --====================================================--
--- Tween section
+-- TWEEN
 --====================================================--
 
 local SpeedSection = Tab:CreateSection({
@@ -621,14 +729,19 @@ local SpeedSection = Tab:CreateSection({
 
 SpeedSection:AddSlider({
     Text = "Tween Speed",
+
     Min = 1,
     Max = 500,
     Default = 50,
     Increment = 1,
-    Callback = function(Value)
-        TweenSpeed = math.max(1, tonumber(Value) or 50)
 
-        -- Restart movement with the new speed.
+    Callback = function(Value)
+        TweenSpeed = math.max(
+            1,
+            tonumber(Value) or 50
+        )
+
+        -- Restart movement using the new speed.
         if ActiveTween then
             stopTween()
         end
@@ -637,17 +750,22 @@ SpeedSection:AddSlider({
 
 SpeedSection:AddSlider({
     Text = "Stop Distance",
+
     Min = 0,
     Max = 10,
     Default = 2,
     Increment = 0.5,
+
     Callback = function(Value)
-        StopDistance = math.max(0, tonumber(Value) or 2)
+        StopDistance = math.max(
+            0,
+            tonumber(Value) or 2
+        )
     end
 })
 
 --====================================================--
--- Mob selection
+-- MOB TYPES
 --====================================================--
 
 local MobSection = Tab:CreateSection({
@@ -656,15 +774,20 @@ local MobSection = Tab:CreateSection({
 
 MobSection:AddDropdown({
     Text = "Select Mobs",
+
     Options = MOB_NAMES,
+
     MultiSelect = true,
+
     Default = MOB_NAMES,
+
     Callback = function(Value)
 
         SelectedMobs = getSelectedLookup(Value)
 
-        -- If everything was deselected,
-        -- immediately stop the current movement.
+        -- Nothing selected:
+        -- stop the current movement but keep
+        -- the farm system ready.
         if next(SelectedMobs) == nil then
             stopTween()
         end
@@ -672,7 +795,7 @@ MobSection:AddDropdown({
 })
 
 --====================================================--
--- Keybind
+-- KEYBIND
 --====================================================--
 
 local KeybindSection = Tab:CreateSection({
@@ -681,7 +804,9 @@ local KeybindSection = Tab:CreateSection({
 
 KeybindSection:AddKeybind({
     Text = "Toggle Farm",
+
     Default = Enum.KeyCode.F,
+
     Callback = function()
         if FarmEnabled then
             stopFarm()
@@ -692,7 +817,7 @@ KeybindSection:AddKeybind({
 })
 
 --====================================================--
--- Initial selection
+-- DEFAULT MOB SELECTION
 --====================================================--
 
 SelectedMobs = getSelectedLookup(MOB_NAMES)
