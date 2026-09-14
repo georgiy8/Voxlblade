@@ -205,7 +205,8 @@ return function(Window, meta)
     local MinHeight, MaxHeight = 15, 400
 
     local RightMouseHeld = false
-    local EHeld = false
+    local AltHeld = false
+    local CtrlHeld = false
     local DraggingIndex = nil
 
     local Connections = {}
@@ -369,10 +370,12 @@ return function(Window, meta)
 
         end
 
-        -- close the shape into an area once it has at least 3 corners
-        if #CurrentPoints >= 3 then
-            CreateLinePart(CurrentPoints[#CurrentPoints], CurrentPoints[1], Color3.fromRGB(255, 120, 0))
-        end
+    end
+
+    local function UndoLastPoint()
+
+        table.remove(CurrentPoints)
+        RedrawZone()
 
     end
 
@@ -382,35 +385,47 @@ return function(Window, meta)
 
     table.insert(Connections, UserInputService.InputBegan:Connect(function(Input, Processed)
 
-        if Input.KeyCode == Enum.KeyCode.E then
-            EHeld = true
+        if Input.KeyCode == Enum.KeyCode.LeftAlt or Input.KeyCode == Enum.KeyCode.RightAlt then
+            AltHeld = true
         end
 
-        if not MapModeEnabled or Processed then
+        if Input.KeyCode == Enum.KeyCode.LeftControl or Input.KeyCode == Enum.KeyCode.RightControl then
+            CtrlHeld = true
+        end
+
+        if Input.KeyCode == Enum.KeyCode.Z and CtrlHeld and MapModeEnabled then
+            UndoLastPoint()
+        end
+
+        if not MapModeEnabled then
             return
         end
 
         if Input.UserInputType == Enum.UserInputType.MouseButton2 then
 
+            -- no "not Processed" check here: Roblox's default camera
+            -- controller sinks MouseButton2 for its own rotation even
+            -- while CameraType is Scriptable, so Processed is ~always
+            -- true for this button — checking it would block panning
             RightMouseHeld = true
 
-        elseif Input.UserInputType == Enum.UserInputType.MouseButton1 then
+        elseif Input.UserInputType == Enum.UserInputType.MouseButton1 and not Processed then
 
-            if EHeld then
+            if AltHeld then
 
-                -- E + Left Click: drop a new point
+                -- Left Alt + Left Click: grab an existing point to drag it
+                local MouseLocation = UserInputService:GetMouseLocation()
+                DraggingIndex = FindNearestPointIndex(MouseLocation, 16)
+
+            else
+
+                -- plain Left Click: drop a new point, auto-connected to the previous one
                 local HitPosition = RaycastFromMouse()
 
                 if HitPosition then
                     table.insert(CurrentPoints, HitPosition)
                     RedrawZone()
                 end
-
-            else
-
-                -- plain Left Click: grab an existing point to drag it
-                local MouseLocation = UserInputService:GetMouseLocation()
-                DraggingIndex = FindNearestPointIndex(MouseLocation, 16)
 
             end
 
@@ -426,7 +441,8 @@ return function(Window, meta)
 
         if Input.UserInputType == Enum.UserInputType.MouseMovement then
 
-            if RightMouseHeld and not Processed then
+            -- same reasoning as above: don't gate panning on Processed
+            if RightMouseHeld then
 
                 local Delta = Input.Delta
                 local PanScale = CameraHeight * 0.0025
@@ -460,8 +476,12 @@ return function(Window, meta)
 
     table.insert(Connections, UserInputService.InputEnded:Connect(function(Input)
 
-        if Input.KeyCode == Enum.KeyCode.E then
-            EHeld = false
+        if Input.KeyCode == Enum.KeyCode.LeftAlt or Input.KeyCode == Enum.KeyCode.RightAlt then
+            AltHeld = false
+        end
+
+        if Input.KeyCode == Enum.KeyCode.LeftControl or Input.KeyCode == Enum.KeyCode.RightControl then
+            CtrlHeld = false
         end
 
         if Input.UserInputType == Enum.UserInputType.MouseButton2 then
@@ -493,12 +513,9 @@ return function(Window, meta)
     })
 
     Section:AddButton({
-        Text = "Undo Last Point",
+        Text = "Undo Last Point (Ctrl+Z)",
         Callback = function()
-
-            table.remove(CurrentPoints)
-            RedrawZone()
-
+            UndoLastPoint()
         end
     })
 
