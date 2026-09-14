@@ -171,7 +171,7 @@ return function(Window, meta)
     local Tab = Window:CreateTab({
         Name = "Zone Farm",
         Icon = "🗺️",
-        Order = (meta and meta.Order) or 15,
+        Order = (meta and meta.Order) or 80,
     })
 
     local Section = Tab:CreateSection({
@@ -199,8 +199,9 @@ return function(Window, meta)
     local MapModeEnabled = false
     local PreviousCameraType = Camera.CameraType
 
-    local CameraCenter = Vector3.new(0, 0, 0) -- X/Z only, Y ignored here
-    local CameraHeight = 60
+    local CameraCenter = Vector3.new(0, 0, 0) -- X/Z only
+    local BaseElevation = 0                    -- ground/world Y under CameraCenter, set on enable
+    local CameraHeight = 60                    -- studs ABOVE BaseElevation, not an absolute world Y
     local MinHeight, MaxHeight = 15, 400
 
     local RightMouseHeld = false
@@ -215,10 +216,13 @@ return function(Window, meta)
 
     local function UpdateCameraCFrame()
 
-        local Position = Vector3.new(CameraCenter.X, CameraHeight, CameraCenter.Z)
+        local Position = Vector3.new(CameraCenter.X, BaseElevation + CameraHeight, CameraCenter.Z)
+        local LookAt = Position - Vector3.new(0, 1, 0)
 
-        -- straight top-down look: aim at the point directly below the camera
-        Camera.CFrame = CFrame.new(Position, Position - Vector3.new(0, 1, 0))
+        -- straight top-down look: forward is parallel to the default (0,1,0) up
+        -- vector, which makes CFrame.new's basis degenerate — give it an
+        -- explicit, non-parallel up vector instead.
+        Camera.CFrame = CFrame.lookAt(Position, LookAt, Vector3.new(0, 0, -1))
 
     end
 
@@ -237,6 +241,7 @@ return function(Window, meta)
 
         if Root then
             CameraCenter = Vector3.new(Root.Position.X, 0, Root.Position.Z)
+            BaseElevation = Root.Position.Y
         end
 
         UpdateCameraCFrame()
