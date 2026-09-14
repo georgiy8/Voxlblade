@@ -877,7 +877,12 @@ return function(Window, meta)
                 local point = getWorldPoint()
 
                 if point then
-                    GroundY = point.Y
+                    -- The first point locks the zone height.
+                    -- Every following point uses exactly the same Y.
+                    if #Points == 0 then
+                        GroundY = point.Y
+                    end
+
                     addPoint(Vector3.new(point.X, GroundY, point.Z))
                 end
 
@@ -957,9 +962,9 @@ return function(Window, meta)
     end)
 
     local Main = Window:CreateTab({
-        Name = "Main",
-        Icon = "🏠",
-        Order = meta and meta.Order or 90
+        Name = "Map=editor",
+        Icon = "🗺️",
+        Order = meta and meta.Order or 15
     })
 
     local EditorSection = Main:CreateSection({
@@ -979,14 +984,14 @@ return function(Window, meta)
     })
 
     EditorSection:AddButton({
-        Name = "Undo",
+        Text = "Undo Last Action",
         Callback = function()
             undo()
         end
     })
 
     EditorSection:AddButton({
-        Name = "Clear",
+        Text = "Clear All Points and Lines",
         Callback = function()
             clearAll()
         end
@@ -1026,7 +1031,7 @@ return function(Window, meta)
     end
 
     StorageSection:AddButton({
-        Name = "Save Zone",
+        Text = "Save Current Farm Zone",
         Callback = function()
             local name = getZoneName()
 
@@ -1048,7 +1053,7 @@ return function(Window, meta)
     })
 
     StorageSection:AddButton({
-        Name = "Load Zone",
+        Text = "Load Selected Farm Zone",
         Callback = function()
             local selected = SavedZones:GetValue()
 
@@ -1073,14 +1078,14 @@ return function(Window, meta)
     })
 
     StorageSection:AddButton({
-        Name = "Refresh List",
+        Text = "Refresh Saved Zones",
         Callback = function()
             refreshZones()
         end
     })
 
     StorageSection:AddButton({
-        Name = "Delete Zone",
+        Text = "Delete Selected Zone",
         Callback = function()
             local selected = SavedZones:GetValue()
 
