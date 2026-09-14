@@ -220,7 +220,9 @@ return function(Window, meta)
     local CameraHeight = 60                    -- studs ABOVE BaseElevation, not an absolute world Y
     local MinHeight, MaxHeight = 15, 400
 
-    local MiddleMouseHeld = false
+    local PanMouseHeld = false
+    local PanStartMouse = nil
+    local PanStartCameraCenter = nil
     local EHeld = false
     local AltHeld = false
     local CtrlHeld = false
@@ -587,147 +589,118 @@ return function(Window, meta)
     -- Input handling
     --------------------------------------------------------
 
-    table.insert(Connections, UserInputService.InputBegan:Connect(function(Input, Processed)
+table.insert(Connections, UserInputService.InputBegan:Connect(function(Input, Processed)
 
-        if Input.KeyCode == Enum.KeyCode.E then
-            EHeld = true
-        end
+    if Input.KeyCode == Enum.KeyCode.E then
+        EHeld = true
+    end
 
-        if Input.KeyCode == Enum.KeyCode.LeftAlt or Input.KeyCode == Enum.KeyCode.RightAlt then
-            AltHeld = true
-        end
+    if Input.KeyCode == Enum.KeyCode.LeftAlt or Input.KeyCode == Enum.KeyCode.RightAlt then
+        AltHeld = true
+    end
 
-        if Input.KeyCode == Enum.KeyCode.LeftControl or Input.KeyCode == Enum.KeyCode.RightControl then
-            CtrlHeld = true
-        end
+    if Input.KeyCode == Enum.KeyCode.LeftControl or Input.KeyCode == Enum.KeyCode.RightControl then
+        CtrlHeld = true
+    end
 
-        if Input.KeyCode == Enum.KeyCode.Z and CtrlHeld and MapModeEnabled then
-            Undo()
-        end
+    if Input.KeyCode == Enum.KeyCode.Z and CtrlHeld and MapModeEnabled then
+        Undo()
+    end
 
-        if not MapModeEnabled then
+    if not MapModeEnabled then
+        return
+    end
+
+    if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+
+        -- Alt + Left Click = move existing point
+        if AltHeld then
+            local MouseLocation = UserInputService:GetMouseLocation()
+            DraggingIndex = FindNearestPointIndex(MouseLocation, 16)
             return
         end
 
-        if Input.UserInputType == Enum.UserInputType.MouseButton3 then
-
-            -- Dota 2 style: hold Middle Mouse Button and move the cursor to pan.
-            -- No "not Processed" check: Roblox's default camera controller
-            -- sinks some mouse buttons for its own use even while
-            -- CameraType is Scriptable, so Processed can't be trusted here.
-            MiddleMouseHeld = true
-
-        elseif Input.UserInputType == Enum.UserInputType.MouseButton1 and not Processed then
-
-            if EHeld then
-
-                -- E + Left Click on an existing point: select it.
-                -- Selecting a second point connects the two with a line
-                -- and clears the selection. Clicking the same point again cancels it.
-                local MouseLocation = UserInputService:GetMouseLocation()
-                local Index = FindNearestPointIndex(MouseLocation, 16)
-
-                if Index then
-
-                    if not SelectedIndex then
-                        SelectedIndex = Index
-                        RedrawZone()
-                    elseif SelectedIndex == Index then
-                        SelectedIndex = nil
-                        RedrawZone()
-                    else
-                        ConnectPoints(SelectedIndex, Index)
-                        SelectedIndex = nil
-                        RedrawZone()
-                    end
-
-                end
-
-            elseif AltHeld then
-
-                -- Left Alt + Left Click: grab an existing point to drag it
-                local MouseLocation = UserInputService:GetMouseLocation()
-                DraggingIndex = FindNearestPointIndex(MouseLocation, 16)
-
-            else
-
-                -- plain Left Click: drop a new, unconnected point
-                local HitPosition = RaycastFromMouse()
-
-                if HitPosition then
-                    AddPoint(HitPosition)
-                end
-
+        -- E + Left Click = select/connect points
+        if EHeld then
+            if Processed then
+                return
             end
 
+            local MouseLocation = UserInputService:GetMouseLocation()
+            local Index = FindNearestPointIndex(MouseLocation, 16)
+
+            if Index then
+                if not SelectedIndex then
+                    SelectedIndex = Index
+                    RedrawZone()
+
+                elseif SelectedIndex == Index then
+                    SelectedIndex = nil
+                    RedrawZone()
+
+                else
+                    ConnectPoints(SelectedIndex, Index)
+                    SelectedIndex = nil
+                    RedrawZone()
+                end
+            end
+
+            return
         end
 
-    end))
+        -- Normal Left Click:
+        -- start pan, actual click-to-add is delayed until release.
+        PanMouseHeld = true
+        PanStartMouse = UserInputService:GetMouseLocation()
+        PanStartCameraCenter = CameraCenter
+    end
+
+end))
 
     table.insert(Connections, UserInputService.InputChanged:Connect(function(Input, Processed)
 
-        if not MapModeEnabled then
-            return
-        end
+    if not MapModeEnabled then
+        return
+    end
 
-        if Input.UserInputType == Enum.UserInputType.MouseMovement then
+    if Input.UserInputType == Enum.UserInputType.MouseMovement then
 
-            if MiddleMouseHeld then
+        if PanMouseHeld and PanStartMouse and PanStartCameraCenter then
+            local MouseLocation = UserInputService:GetMouseLocation()
+            local Delta = MouseLocation - PanStartMouse
 
-                local Delta = Input.Delta
-                local PanScale = CameraHeight * 0.0025
+            local PanScale = CameraHeight * 0.0025
 
-                CameraCenter = CameraCenter - Vector3.new(Delta.X, 0, Delta.Y) * PanScale
-                UpdateCameraCFrame()
+            CameraCenter =
+                PanStartCameraCenter
+                - Vector3.new(Delta.X, 0, Delta.Y) * PanScale
 
-            end
-
-            if DraggingIndex then
-
-                local HitPosition = RaycastFromMouse()
-
-                if HitPosition then
-                    CurrentPoints[DraggingIndex] = HitPosition
-                    RedrawZone()
-                end
-
-            end
-
-        elseif Input.UserInputType == Enum.UserInputType.MouseWheel then
-
-            local ZoomStep = 8
-
-            CameraHeight = math.clamp(CameraHeight - Input.Position.Z * ZoomStep, MinHeight, MaxHeight)
             UpdateCameraCFrame()
-
         end
 
-    end))
+        if DraggingIndex then
+            local HitPosition = RaycastFromMouse()
 
-    table.insert(Connections, UserInputService.InputEnded:Connect(function(Input)
-
-        if Input.KeyCode == Enum.KeyCode.E then
-            EHeld = false
+            if HitPosition then
+                CurrentPoints[DraggingIndex] = HitPosition
+                RedrawZone()
+            end
         end
 
-        if Input.KeyCode == Enum.KeyCode.LeftAlt or Input.KeyCode == Enum.KeyCode.RightAlt then
-            AltHeld = false
-        end
+    elseif Input.UserInputType == Enum.UserInputType.MouseWheel then
 
-        if Input.KeyCode == Enum.KeyCode.LeftControl or Input.KeyCode == Enum.KeyCode.RightControl then
-            CtrlHeld = false
-        end
+        local ZoomStep = 8
 
-        if Input.UserInputType == Enum.UserInputType.MouseButton3 then
-            MiddleMouseHeld = false
-        end
+        CameraHeight = math.clamp(
+            CameraHeight - Input.Position.Z * ZoomStep,
+            MinHeight,
+            MaxHeight
+        )
 
-        if Input.UserInputType == Enum.UserInputType.MouseButton1 then
-            DraggingIndex = nil
-        end
+        UpdateCameraCFrame()
+    end
 
-    end))
-
+end))
     --------------------------------------------------------
     -- GUI
     --------------------------------------------------------
