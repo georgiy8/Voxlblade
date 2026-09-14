@@ -171,7 +171,7 @@ return function(Window, meta)
     local Tab = Window:CreateTab({
         Name = "Zone Farm",
         Icon = "🗺️",
-        Order = (meta and meta.Order) or 80,
+        Order = (meta and meta.Order) or 15,
     })
 
     local Section = Tab:CreateSection({
