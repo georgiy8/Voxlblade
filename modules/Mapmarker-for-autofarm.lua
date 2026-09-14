@@ -221,8 +221,6 @@ return function(Window, meta)
     local MinHeight, MaxHeight = 15, 400
 
     local PanMouseHeld = false
-    local PanStartMouse = nil
-    local PanStartCameraCenter = nil
     local EHeld = false
     local AltHeld = false
     local CtrlHeld = false
@@ -648,11 +646,20 @@ table.insert(Connections, UserInputService.InputBegan:Connect(function(Input, Pr
             return
         end
 
-        -- Normal Left Click:
-        -- start pan, actual click-to-add is delayed until release.
+        -- Normal Left Click = add a point.
+        if not Processed then
+            local HitPosition = RaycastFromMouse()
+
+            if HitPosition then
+                AddPoint(HitPosition)
+            end
+        end
+
+    elseif Input.UserInputType == Enum.UserInputType.MouseButton3 then
+
+        -- Middle Mouse Button = Dota 2 style map pan.
         PanMouseHeld = true
-        PanStartMouse = UserInputService:GetMouseLocation()
-        PanStartCameraCenter = CameraCenter
+
     end
 
 end))
@@ -665,14 +672,12 @@ end))
 
     if Input.UserInputType == Enum.UserInputType.MouseMovement then
 
-        if PanMouseHeld and PanStartMouse and PanStartCameraCenter then
-            local MouseLocation = UserInputService:GetMouseLocation()
-            local Delta = MouseLocation - PanStartMouse
-
+        if PanMouseHeld then
+            local Delta = Input.Delta
             local PanScale = CameraHeight * 0.0025
 
             CameraCenter =
-                PanStartCameraCenter
+                CameraCenter
                 - Vector3.new(Delta.X, 0, Delta.Y) * PanScale
 
             UpdateCameraCFrame()
@@ -701,6 +706,31 @@ end))
     end
 
 end))
+
+    table.insert(Connections, UserInputService.InputEnded:Connect(function(Input)
+
+        if Input.KeyCode == Enum.KeyCode.E then
+            EHeld = false
+        end
+
+        if Input.KeyCode == Enum.KeyCode.LeftAlt or Input.KeyCode == Enum.KeyCode.RightAlt then
+            AltHeld = false
+        end
+
+        if Input.KeyCode == Enum.KeyCode.LeftControl or Input.KeyCode == Enum.KeyCode.RightControl then
+            CtrlHeld = false
+        end
+
+        if Input.UserInputType == Enum.UserInputType.MouseButton3 then
+            PanMouseHeld = false
+        end
+
+        if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            DraggingIndex = nil
+        end
+
+    end))
+
     --------------------------------------------------------
     -- GUI
     --------------------------------------------------------
