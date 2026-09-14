@@ -1,342 +1,13 @@
 return function(Window, meta)
 
-    ------------------------------------------------------------
-    -- Tab
-    ------------------------------------------------------------
-
     local Tab = Window:CreateTab({
-        Name = "Autofarm",
+        Name = "BuniFarm",
         Icon = "🐰",
-        Order = (meta and meta.Order) or 15,
+        Order = (meta and meta.Order) or 30,
     })
 
     ------------------------------------------------------------
-    -- Services
-    ------------------------------------------------------------
-
-    local Players = game:GetService("Players")
-    local TweenService = game:GetService("TweenService")
-    local UserInputService = game:GetService("UserInputService")
-
-    local LocalPlayer = Players.LocalPlayer
-
-    ------------------------------------------------------------
-    -- Mob List
-    ------------------------------------------------------------
-
-    local MobNames = {
-        "Buni",
-        "DireBuni",
-        "PlainsWoof",
-        "Mageling",
-        "Croakernaut",
-        "LordFrogg",
-        "Bulfrogg",
-        "Toadzerker",
-        "Dragigator",
-        "Lilimonster",
-        "Drone",
-        "Bumblz",
-        "Bomber",
-        "QueenBumblz",
-        "Puffball",
-        "SporeBossMan",
-        "Sporeling",
-        "Lord Stratos Altolodon",
-        "Whirlray",
-        "Caci",
-        "Slizard",
-        "CaciKing",
-        "StoneCleric",
-        "VoidRoot",
-        "Bowldur",
-        "BastionGuardian",
-        "StoneArcher",
-        "StoneKnight",
-        "CrazyHare",
-        "BaniPrince",
-        "RedRockHare",
-        "Batty",
-        "GlacialSnapper",
-        "WinterWoof",
-        "Delta-Spider",
-        "Stalker",
-        "Scow",
-        "SteamGolem",
-        "Omega-Batty",
-        "DeepSpider",
-        "BrainBurner",
-        "Proto-Mungus",
-        "Easter",
-        "Grumpkin",
-        "THEHALLOWSOUL",
-    }
-
-    ------------------------------------------------------------
-    -- State
-    ------------------------------------------------------------
-
-    local Farming = false
-    local SelectedMobs = {}
-    local TweenSpeed = 80
-
-    local CurrentTween = nil
-    local CurrentTarget = nil
-
-    ------------------------------------------------------------
-    -- Helpers
-    ------------------------------------------------------------
-
-    local function GetCharacter()
-        return LocalPlayer.Character
-    end
-
-    local function GetRoot()
-        local Character = GetCharacter()
-
-        if not Character then
-            return nil
-        end
-
-        return Character:FindFirstChild("HumanoidRootPart")
-    end
-
-    local function IsSelectedMob(Name)
-        if type(Name) ~= "string" then
-            return false
-        end
-
-        -- Убираем случайные цифры в конце:
-        -- Buni07 -> Buni
-        -- Omega-Batty05 -> Omega-Batty
-        local BaseName = Name:gsub("%d+$", "")
-
-        for _, SelectedName in ipairs(SelectedMobs) do
-            if BaseName == SelectedName then
-                return true
-            end
-        end
-
-        return false
-    end
-
-    local function GetMobHitbox(Mob)
-        if not Mob or not Mob.Parent then
-            return nil
-        end
-
-        local Hitbox = Mob:FindFirstChild("Hitbox")
-
-        if Hitbox and Hitbox:IsA("BasePart") then
-            return Hitbox
-        end
-
-        return nil
-    end
-
-    ------------------------------------------------------------
-    -- Find Nearest Mob
-    ------------------------------------------------------------
-
-    local function FindNearestMob()
-        local Root = GetRoot()
-
-        if not Root then
-            return nil
-        end
-
-        local NearestMob = nil
-        local NearestHitbox = nil
-        local NearestDistance = math.huge
-
-        for _, Object in ipairs(workspace:GetDescendants()) do
-
-            if Object:IsA("BasePart") and IsSelectedMob(Object.Name) then
-
-                local Hitbox = GetMobHitbox(Object)
-
-                if Hitbox then
-
-                    local Distance = (Root.Position - Hitbox.Position).Magnitude
-
-                    if Distance < NearestDistance then
-                        NearestDistance = Distance
-                        NearestMob = Object
-                        NearestHitbox = Hitbox
-                    end
-
-                end
-            end
-        end
-
-        if NearestMob and NearestHitbox then
-            return NearestMob, NearestHitbox
-        end
-
-        return nil
-    end
-
-    ------------------------------------------------------------
-    -- Stop Current Tween
-    ------------------------------------------------------------
-
-    local function CancelTween()
-        if CurrentTween then
-            CurrentTween:Cancel()
-            CurrentTween = nil
-        end
-
-        CurrentTarget = nil
-    end
-
-    ------------------------------------------------------------
-    -- Tween To Target
-    ------------------------------------------------------------
-
-    local function TweenToTarget(Mob, Hitbox)
-        local Root = GetRoot()
-
-        if not Root or not Mob or not Mob.Parent or not Hitbox or not Hitbox.Parent then
-            return false
-        end
-
-        CurrentTarget = Mob
-
-        local Distance = (Root.Position - Hitbox.Position).Magnitude
-
-        if Distance <= 2 then
-            return true
-        end
-
-        local Duration = Distance / math.max(TweenSpeed, 1)
-
-        CurrentTween = TweenService:Create(
-            Root,
-            TweenInfo.new(
-                Duration,
-                Enum.EasingStyle.Linear,
-                Enum.EasingDirection.Out
-            ),
-            {
-                CFrame = Hitbox.CFrame
-            }
-        )
-
-        CurrentTween:Play()
-
-        local Completed = false
-
-        local Connection
-        Connection = CurrentTween.Completed:Connect(function()
-            Completed = true
-
-            if Connection then
-                Connection:Disconnect()
-            end
-        end)
-
-        while Farming and not Completed do
-
-            if not Mob.Parent then
-                CurrentTween:Cancel()
-                Connection:Disconnect()
-
-                CurrentTween = nil
-                CurrentTarget = nil
-
-                return false
-            end
-
-            if not Hitbox.Parent then
-                CurrentTween:Cancel()
-                Connection:Disconnect()
-
-                CurrentTween = nil
-                CurrentTarget = nil
-
-                return false
-            end
-
-            if not IsSelectedMob(Mob.Name) then
-                CurrentTween:Cancel()
-                Connection:Disconnect()
-
-                CurrentTween = nil
-                CurrentTarget = nil
-
-                return false
-            end
-
-            if not GetRoot() then
-                CurrentTween:Cancel()
-                Connection:Disconnect()
-
-                CurrentTween = nil
-                CurrentTarget = nil
-
-                return false
-            end
-
-            task.wait()
-        end
-
-        if Connection then
-            Connection:Disconnect()
-        end
-
-        CurrentTween = nil
-
-        return Farming
-    end
-
-    ------------------------------------------------------------
-    -- Farm Loop
-    ------------------------------------------------------------
-
-    local function StartFarm()
-        if Farming then
-            return
-        end
-
-        Farming = true
-
-        task.spawn(function()
-
-            while Farming do
-
-                local Root = GetRoot()
-
-                if not Root then
-                    task.wait(0.25)
-                    continue
-                end
-
-                local Mob, Hitbox = FindNearestMob()
-
-                if Mob and Hitbox then
-
-                    TweenToTarget(Mob, Hitbox)
-
-                else
-                    task.wait(0.2)
-                end
-            end
-
-            CancelTween()
-        end)
-    end
-
-    ------------------------------------------------------------
-    -- Stop Farm
-    ------------------------------------------------------------
-
-    local function StopFarm()
-        Farming = false
-        CancelTween()
-    end
-
-    ------------------------------------------------------------
-    -- Main Section
+    -- Main
     ------------------------------------------------------------
 
     local Main = Tab:CreateSection({
@@ -347,13 +18,7 @@ return function(Window, meta)
         Text = "Enable Farm",
         Default = false,
         Callback = function(Value)
-
-            if Value then
-                StartFarm()
-            else
-                StopFarm()
-            end
-
+            print("BuniFarm:", Value)
         end
     })
 
@@ -364,25 +29,67 @@ return function(Window, meta)
         Default = 80,
         Increment = 1,
         Callback = function(Value)
-            TweenSpeed = Value
+            print("Tween Speed:", Value)
         end
     })
 
     Main:AddDropdown({
         Text = "Mob Types",
-        Options = MobNames,
+        Options = {
+            "Buni",
+            "DireBuni",
+            "PlainsWoof",
+            "Mageling",
+            "Croakernaut",
+            "LordFrogg",
+            "Bulfrogg",
+            "Toadzerker",
+            "Dragigator",
+            "Lilimonster",
+            "Drone",
+            "Bumblz",
+            "Bomber",
+            "QueenBumblz",
+            "Puffball",
+            "SporeBossMan",
+            "Sporeling",
+            "Lord Stratos Altolodon",
+            "Whirlray",
+            "Caci",
+            "Slizard",
+            "CaciKing",
+            "StoneCleric",
+            "VoidRoot",
+            "Bowldur",
+            "BastionGuardian",
+            "StoneArcher",
+            "StoneKnight",
+            "CrazyHare",
+            "BaniPrince",
+            "RedRockHare",
+            "Batty",
+            "GlacialSnapper",
+            "WinterWoof",
+            "Delta-Spider",
+            "Stalker",
+            "Scow",
+            "SteamGolem",
+            "Omega-Batty",
+            "DeepSpider",
+            "BrainBurner",
+            "Proto-Mungus",
+            "Easter",
+            "Grumpkin",
+            "THEHALLOWSOUL",
+        },
         MultiSelect = true,
         Callback = function(Value)
-            SelectedMobs = Value
-
-            if Farming then
-                CancelTween()
-            end
+            print("Selected mobs:", table.concat(Value, ", "))
         end
     })
 
     ------------------------------------------------------------
-    -- Controls Section
+    -- Controls
     ------------------------------------------------------------
 
     local Controls = Tab:CreateSection({
@@ -392,14 +99,14 @@ return function(Window, meta)
     Controls:AddButton({
         Text = "Start Farm",
         Callback = function()
-            StartFarm()
+            print("Start Farm")
         end
     })
 
     Controls:AddButton({
         Text = "Stop Farm",
         Callback = function()
-            StopFarm()
+            print("Stop Farm")
         end
     })
 
@@ -407,14 +114,8 @@ return function(Window, meta)
         Text = "Toggle Farm",
         Default = Enum.KeyCode.F,
         Callback = function()
-
-            if Farming then
-                StopFarm()
-            else
-                StartFarm()
-            end
-
+            print("Toggle Farm")
         end
-    })
+    )
 
 end
