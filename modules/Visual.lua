@@ -58,12 +58,68 @@ local MOB_NAMES = {
     "THEHALLOWSOUL",
 }
 
+-- Per-mob ESP colors
+local MOB_COLORS = {
+    ["Buni"] = Color3.fromRGB(255, 255, 255),
+    ["DireBuni"] = Color3.fromRGB(225, 225, 225),
+    ["PlainsWoof"] = Color3.fromRGB(145, 145, 145),
+    ["Mageling"] = Color3.fromRGB(70, 130, 255),
+    ["Croakernaut"] = Color3.fromRGB(150, 95, 55),
+    ["LordFrogg"] = Color3.fromRGB(35, 95, 45),
+    ["Bulfrogg"] = Color3.fromRGB(140, 220, 80),
+    ["Toadzerker"] = Color3.fromRGB(50, 255, 70),
+    ["Dragigator"] = Color3.fromRGB(45, 170, 70),
+    ["Lilimonster"] = Color3.fromRGB(170, 125, 90),
+    ["Drone"] = Color3.fromRGB(255, 245, 40),
+    ["Bumblz"] = Color3.fromRGB(235, 205, 40),
+    ["Bomber"] = Color3.fromRGB(255, 145, 40),
+    ["QueenBumblz"] = Color3.fromRGB(255, 205, 45),
+    ["Puffball"] = Color3.fromRGB(220, 90, 190),
+    ["SporeBossMan"] = Color3.fromRGB(255, 105, 170),
+    ["Sporeling"] = Color3.fromRGB(35, 175, 255),
+    ["Lord Stratos Altolodon"] = Color3.fromRGB(235, 235, 245),
+    ["Whirlray"] = Color3.fromRGB(175, 190, 195),
+    ["Caci"] = Color3.fromRGB(70, 180, 75),
+    ["Slizard"] = Color3.fromRGB(145, 95, 60),
+    ["CaciKing"] = Color3.fromRGB(25, 105, 45),
+    ["StoneCleric"] = Color3.fromRGB(145, 105, 70),
+    ["VoidRoot"] = Color3.fromRGB(125, 105, 145),
+    ["Bowldur"] = Color3.fromRGB(145, 105, 75),
+    ["BastionGuardian"] = Color3.fromRGB(130, 100, 70),
+    ["StoneArcher"] = Color3.fromRGB(155, 115, 80),
+    ["StoneKnight"] = Color3.fromRGB(120, 90, 65),
+    ["CrazyHare"] = Color3.fromRGB(145, 145, 145),
+    ["BaniPrince"] = Color3.fromRGB(155, 105, 70),
+    ["RedRockHare"] = Color3.fromRGB(65, 65, 70),
+    ["Batty"] = Color3.fromRGB(60, 60, 65),
+    ["GlacialSnapper"] = Color3.fromRGB(50, 220, 255),
+    ["WinterWoof"] = Color3.fromRGB(255, 255, 255),
+    ["Delta-Spider"] = Color3.fromRGB(225, 230, 235),
+    ["Stalker"] = Color3.fromRGB(255, 60, 190),
+    ["Scow"] = Color3.fromRGB(145, 95, 65),
+    ["SteamGolem"] = Color3.fromRGB(190, 105, 55),
+    ["Omega-Batty"] = Color3.fromRGB(55, 55, 60),
+    ["DeepSpider"] = Color3.fromRGB(225, 215, 240),
+    ["BrainBurner"] = Color3.fromRGB(255, 80, 25),
+    ["Proto-Mungus"] = Color3.fromRGB(245, 190, 215),
+    ["Easter"] = Color3.fromRGB(255, 125, 190),
+    ["Grumpkin"] = Color3.fromRGB(220, 125, 35),
+    ["THEHALLOWSOUL"] = Color3.fromRGB(70, 45, 25),
+}
+
 local MOB_BY_LEN = table.clone(MOB_NAMES)
 table.sort(MOB_BY_LEN, function(a, b)
     return #a > #b
 end)
 
 local MUTATIONS = { "Legendary", "Magical", "Corrupt", "Bloody" }
+
+local MUTATION_COLORS = {
+    Legendary = Color3.fromRGB(255, 215, 0),
+    Magical = Color3.fromRGB(0, 140, 255),
+    Corrupt = Color3.fromRGB(175, 70, 255),
+    Bloody = Color3.fromRGB(190, 20, 25),
+}
 
 local STAND_NAMES = { "Stand", "Stand2" }
 
@@ -445,6 +501,32 @@ return function(Window, meta)
         return found
     end
 
+    local function getMobColor(kind)
+        return MOB_COLORS[kind] or MState.Color
+    end
+
+    local function getMutationColor(active)
+        for _, mut in ipairs(MUTATIONS) do
+            if active[mut] then
+                return MUTATION_COLORS[mut] or MState.MutationColor
+            end
+        end
+        return MState.MutationColor
+    end
+
+    local function activeMutationSet(root)
+        local found = {}
+        if not MState.MutationEnabled then
+            return found
+        end
+        for _, mut in ipairs(MUTATIONS) do
+            if MState.SelectedMutations[mut] and mutationOn(root, mut) then
+                found[mut] = true
+            end
+        end
+        return found
+    end
+
     local function clearMob(inst)
         local pack = mobDrawings[inst]
         if not pack then return end
@@ -468,7 +550,7 @@ return function(Window, meta)
         for inst in pairs(mutationDrawings) do clearMutation(inst) end
     end
 
-    local function ensureMobPack(inst, hitbox)
+    local function ensureMobPack(inst, hitbox, kind)
         local pack = mobDrawings[inst]
         if pack then return pack end
 
@@ -479,8 +561,9 @@ return function(Window, meta)
         hl.FillTransparency = 0.65
         hl.OutlineTransparency = 0
         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        hl.FillColor = MState.Color
-        hl.OutlineColor = MState.Color
+        local mobColor = getMobColor(kind)
+        hl.FillColor = mobColor
+        hl.OutlineColor = mobColor
         hl.Enabled = MState.BoxESP
         hl.Parent = MobFolder
         pack.highlight = hl
@@ -499,7 +582,7 @@ return function(Window, meta)
         label.Size = UDim2.fromScale(1, 1)
         label.Font = Enum.Font.Code
         label.TextSize = 13
-        label.TextColor3 = MState.Color
+        label.TextColor3 = mobColor
         label.TextStrokeTransparency = 0.4
         label.Text = inst.Name
         label.Parent = bb
@@ -984,51 +1067,62 @@ return function(Window, meta)
                         end
 
                         if hitbox then
+                            local mutationSet = wantMutation and activeMutationSet(inst) or nil
+                            local hasMutation = mutationSet and next(mutationSet) ~= nil
+
                             if wantMob then
                                 seenMob[inst] = true
-                                local muts = wantMutation and activeMutations(inst) or {}
-                                local pack = ensureMobPack(inst, hitbox)
+                                local mobColor = getMobColor(data.kind)
+                                local pack = ensureMobPack(inst, hitbox, data.kind)
                                 if pack.highlight then
                                     pack.highlight.Enabled = MState.BoxESP
                                     pack.highlight.Adornee = inst
-                                    pack.highlight.FillColor = MState.Color
-                                    pack.highlight.OutlineColor = MState.Color
+                                    pack.highlight.FillColor = mobColor
+                                    pack.highlight.OutlineColor = mobColor
                                 end
                                 if pack.billboard then
                                     pack.billboard.Enabled = MState.TextESP
                                     pack.billboard.Adornee = hitbox
                                     if pack.label and MState.TextESP then
                                         local dist = myHRP and math.floor((myHRP.Position - hitbox.Position).Magnitude) or 0
-                                        local mutText = #muts > 0 and (" [" .. table.concat(muts, ",") .. "]") or ""
+                                        local mutText = hasMutation and (" [" .. table.concat((function()
+                                            local t = {}
+                                            for _, mut in ipairs(MUTATIONS) do
+                                                if mutationSet[mut] then t[#t + 1] = mut end
+                                            end
+                                            return t
+                                        end)(), ",") .. "]") or ""
                                         pack.label.Text = string.format("%s%s\n%d studs", inst.Name, mutText, dist)
-                                        pack.label.TextColor3 = MState.Color
+                                        pack.label.TextColor3 = mobColor
                                     end
                                 end
                             end
 
-                            if wantMutation then
-                                local muts = activeMutations(inst)
-                                if #muts > 0 then
-                                    seenMutation[inst] = true
-                                    local pack = ensureMutationPack(inst, hitbox)
-                                    pack.highlight.Enabled = true
-                                    pack.highlight.Adornee = inst
-                                    pack.highlight.FillColor = MState.MutationColor
-                                    pack.highlight.OutlineColor = MState.MutationColor
-                                    pack.label.Text = table.concat(muts, ", ")
-                                    pack.label.TextColor3 = MState.MutationColor
-                                    pack.billboard.Adornee = hitbox
+                            if wantMutation and hasMutation then
+                                seenMutation[inst] = true
+                                local mutationColor = getMutationColor(mutationSet)
+                                local pack = ensureMutationPack(inst, hitbox)
+                                pack.highlight.Enabled = true
+                                pack.highlight.Adornee = inst
+                                pack.highlight.FillColor = mutationColor
+                                pack.highlight.OutlineColor = mutationColor
+                                pack.label.TextColor3 = mutationColor
+                                pack.billboard.Adornee = hitbox
+                                local names = {}
+                                for _, mut in ipairs(MUTATIONS) do
+                                    if mutationSet[mut] then names[#names + 1] = mut end
+                                end
+                                pack.label.Text = table.concat(names, ", ")
 
-                                    if pack.line then
-                                        local pos, onScreen = cam:WorldToViewportPoint(hitbox.Position)
-                                        if onScreen and pos.Z > 0 then
-                                            pack.line.From = center
-                                            pack.line.To = Vector2.new(pos.X, pos.Y)
-                                            pack.line.Color = MState.MutationColor
-                                            pack.line.Visible = true
-                                        else
-                                            pack.line.Visible = false
-                                        end
+                                if pack.line then
+                                    local pos, onScreen = cam:WorldToViewportPoint(hitbox.Position)
+                                    if onScreen and pos.Z > 0 then
+                                        pack.line.From = center
+                                        pack.line.To = Vector2.new(pos.X, pos.Y)
+                                        pack.line.Color = mutationColor
+                                        pack.line.Visible = true
+                                    else
+                                        pack.line.Visible = false
                                     end
                                 end
                             end
