@@ -337,22 +337,26 @@ return function(Window, meta)
     })
 
     ------------------------------------------------------------
-    -- Mob ESP state
-    -- Buni07 (MeshPart) -> Hitbox (MeshPart)
-    -- Mutation: Particle NAME + PointLight NAMEL both Enabled
-    -- Mutation multi-select turns ON tracers to matching mobs
+    -- Mob ESP + Mutations
+    -- Mob ESP and mutation ESP are independent.
+    -- Mob cache is event-driven; no workspace:GetDescendants() every frame.
     ------------------------------------------------------------
 
     local MState = {
         Enabled = false,
         TextESP = true,
         BoxESP = true,
+        MutationEnabled = false,
         Color = Color3.fromRGB(255, 180, 80),
+        MutationColor = Color3.fromRGB(255, 90, 90),
         SelectedMobs = {},
         SelectedMutations = {},
     }
 
-    local mobDrawings = {} -- [instance] = pack
+    local mobDrawings = {}
+    local mutationDrawings = {}
+    local mobCache = {}
+    local mobConnections = {}
 
     local function selectedSet(list)
         local set = {}
@@ -367,20 +371,32 @@ return function(Window, meta)
         return set
     end
 
+    local MOB_SET = {}
+    for _, name in ipairs(MOB_NAMES) do
+        MOB_SET[name] = true
+    end
+
     local function matchMobType(name)
         if type(name) ~= "string" then
             return nil
         end
+
+        if MOB_SET[name] then
+            return name
+        end
+
+        -- Handles Buni07 / Omega-Batty05 / etc. without scanning the
+        -- entire mob list on every RenderStepped.
+        local base = name:match("^(.-)%d+$")
+        if base and MOB_SET[base] then
+            return base
+        end
+
         for _, kind in ipairs(MOB_BY_LEN) do
-            if MState.SelectedMobs[kind] then
-                if name == kind then
+            if name:sub(1, #kind) == kind then
+                local rest = name:sub(#kind + 1)
+                if rest ~= "" and (rest:match("^%d") or rest:match("^[%s%-%_]")) then
                     return kind
-                end
-                if name:sub(1, #kind) == kind then
-                    local rest = name:sub(#kind + 1)
-                    if rest == "" or rest:match("^%d") or rest:match("^[%s%-%_]") then
-                        return kind
-                    end
                 end
             end
         end
@@ -410,26 +426,20 @@ return function(Window, meta)
         if not particle or not light then
             return false
         end
-        local pOk = false
-        local lOk = false
-        if particle:IsA("ParticleEmitter") or particle:IsA("Beam") or particle:IsA("Trail") then
-            pOk = particle.Enabled == true
-        else
-            pOk = particle.Enabled ~= false
-        end
-        if light:IsA("PointLight") or light:IsA("SpotLight") or light:IsA("SurfaceLight") then
-            lOk = light.Enabled == true
-        else
-            lOk = light.Enabled ~= false
-        end
+
+        local pOk = not (particle:IsA("ParticleEmitter") or particle:IsA("Beam") or particle:IsA("Trail")) or particle.Enabled
+        local lOk = not (light:IsA("PointLight") or light:IsA("SpotLight") or light:IsA("SurfaceLight")) or light.Enabled
         return pOk and lOk
     end
 
     local function activeMutations(root)
         local found = {}
+        if not MState.MutationEnabled then
+            return found
+        end
         for mut in pairs(MState.SelectedMutations) do
             if mutationOn(root, mut) then
-                table.insert(found, mut)
+                found[#found + 1] = mut
             end
         end
         return found
@@ -437,33 +447,32 @@ return function(Window, meta)
 
     local function clearMob(inst)
         local pack = mobDrawings[inst]
-        if not pack then
-            return
-        end
-        if pack.highlight then
-            pack.highlight:Destroy()
-        end
-        if pack.billboard then
-            pack.billboard:Destroy()
-        end
+        if not pack then return end
+        if pack.highlight then pack.highlight:Destroy() end
+        if pack.billboard then pack.billboard:Destroy() end
         destroyLine(pack.line)
         mobDrawings[inst] = nil
     end
 
+    local function clearMutation(inst)
+        local pack = mutationDrawings[inst]
+        if not pack then return end
+        destroyLine(pack.line)
+        if pack.highlight then pack.highlight:Destroy() end
+        if pack.billboard then pack.billboard:Destroy() end
+        mutationDrawings[inst] = nil
+    end
+
     local function clearAllMobs()
-        for inst in pairs(mobDrawings) do
-            clearMob(inst)
-        end
+        for inst in pairs(mobDrawings) do clearMob(inst) end
+        for inst in pairs(mutationDrawings) do clearMutation(inst) end
     end
 
     local function ensureMobPack(inst, hitbox)
         local pack = mobDrawings[inst]
-        if pack then
-            return pack
-        end
+        if pack then return pack end
 
         pack = {}
-
         local hl = Instance.new("Highlight")
         hl.Name = "MobBoxESP"
         hl.Adornee = inst
@@ -497,21 +506,112 @@ return function(Window, meta)
         pack.billboard = bb
         pack.label = label
 
-        if hasDrawing() then
-            local line = Drawing.new("Line")
-            line.Thickness = 1.5
-            line.Color = MState.Color
-            line.Visible = false
-            pack.line = line
-        end
-
         mobDrawings[inst] = pack
         return pack
     end
 
-    ------------------------------------------------------------
-    -- Mob ESP UI  (before Hive)
-    ------------------------------------------------------------
+    local function ensureMutationPack(inst, hitbox)
+        local pack = mutationDrawings[inst]
+        if pack then return pack end
+
+        pack = {}
+        local hl = Instance.new("Highlight")
+        hl.Name = "MobMutationESP"
+        hl.Adornee = inst
+        hl.FillTransparency = 0.85
+        hl.OutlineTransparency = 0
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.FillColor = MState.MutationColor
+        hl.OutlineColor = MState.MutationColor
+        hl.Parent = MobFolder
+        pack.highlight = hl
+
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "MobMutationText"
+        bb.AlwaysOnTop = true
+        bb.Size = UDim2.fromOffset(220, 30)
+        bb.StudsOffset = Vector3.new(0, 3.8, 0)
+        bb.Adornee = hitbox
+        bb.Parent = MobFolder
+
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.fromScale(1, 1)
+        label.Font = Enum.Font.Code
+        label.TextSize = 13
+        label.TextColor3 = MState.MutationColor
+        label.TextStrokeTransparency = 0.35
+        label.Text = ""
+        label.Parent = bb
+        pack.billboard = bb
+        pack.label = label
+
+        if hasDrawing() then
+            local line = Drawing.new("Line")
+            line.Thickness = 1.5
+            line.Color = MState.MutationColor
+            line.Visible = false
+            pack.line = line
+        end
+
+        mutationDrawings[inst] = pack
+        return pack
+    end
+
+    local function isValidMob(inst)
+        if not inst or not inst.Parent or not inst:IsA("BasePart") then return false end
+        local kind = matchMobType(inst.Name)
+        if not kind then return false end
+
+        -- Empty mob selection means "all mobs" for mutation ESP.
+        -- This keeps Mutations completely independent from Mob ESP.
+        local hasMobFilter = next(MState.SelectedMobs) ~= nil
+        if hasMobFilter and not MState.SelectedMobs[kind] then
+            return false
+        end
+
+        return getHitbox(inst) ~= nil
+    end
+
+    local function unregisterMob(inst)
+        mobCache[inst] = nil
+        clearMob(inst)
+        clearMutation(inst)
+    end
+
+    local function registerMob(inst)
+        if not inst:IsA("BasePart") then return end
+        local kind = matchMobType(inst.Name)
+        if not kind then return end
+        local hitbox = getHitbox(inst)
+        if not hitbox then return end
+        mobCache[inst] = { kind = kind, hitbox = hitbox }
+    end
+
+    local function scanMobsOnce()
+        for _, inst in ipairs(workspace:GetDescendants()) do
+            registerMob(inst)
+        end
+    end
+
+    local function rebuildMobConnections()
+        for _, c in ipairs(mobConnections) do c:Disconnect() end
+        table.clear(mobConnections)
+        mobConnections[#mobConnections + 1] = workspace.DescendantAdded:Connect(function(inst)
+            registerMob(inst)
+            -- A Hitbox can be added after the mob itself.
+            local parent = inst.Parent
+            if parent and parent:IsA("BasePart") and inst.Name == "Hitbox" then
+                registerMob(parent)
+            end
+        end)
+        mobConnections[#mobConnections + 1] = workspace.DescendantRemoving:Connect(function(inst)
+            unregisterMob(inst)
+        end)
+    end
+
+    scanMobsOnce()
+    rebuildMobConnections()
 
     local MobSec = Tab:CreateSection({ Name = "Mob ESP" })
 
@@ -522,7 +622,7 @@ return function(Window, meta)
         Callback = function(v)
             MState.Enabled = v
             if not v then
-                clearAllMobs()
+                for inst in pairs(mobDrawings) do clearMob(inst) end
             end
         end,
     })
@@ -531,18 +631,14 @@ return function(Window, meta)
         Text = "Mob name / distance",
         Default = true,
         ConfigKey = "visual.mob.text",
-        Callback = function(v)
-            MState.TextESP = v
-        end,
+        Callback = function(v) MState.TextESP = v end,
     })
 
     MobSec:AddToggle({
         Text = "Mob box",
         Default = true,
         ConfigKey = "visual.mob.box",
-        Callback = function(v)
-            MState.BoxESP = v
-        end,
+        Callback = function(v) MState.BoxESP = v end,
     })
 
     MobSec:AddDropdown({
@@ -553,18 +649,29 @@ return function(Window, meta)
         ConfigKey = "visual.mob.list",
         Callback = function(list)
             MState.SelectedMobs = selectedSet(list)
-            if next(MState.SelectedMobs) == nil then
-                clearAllMobs()
+            for inst in pairs(mobCache) do
+                if not isValidMob(inst) then
+                    clearMob(inst)
+                    clearMutation(inst)
+                end
             end
         end,
     })
 
-    MobSec:AddLabel({
-        Text = "Mutations: both NAME + NAMEL Enabled. Selecting one enables tracers to those mobs.",
+    MobSec:AddToggle({
+        Text = "Enable Mutations",
+        Default = false,
+        ConfigKey = "visual.mob.mutations.enabled",
+        Callback = function(v)
+            MState.MutationEnabled = v
+            if not v then
+                for inst in pairs(mutationDrawings) do clearMutation(inst) end
+            end
+        end,
     })
 
     MobSec:AddDropdown({
-        Text = "Mutations (multi) -> tracers",
+        Text = "Mutations (multi)",
         MultiSelect = true,
         Options = MUTATIONS,
         Default = {},
@@ -572,17 +679,14 @@ return function(Window, meta)
         Callback = function(list)
             MState.SelectedMutations = selectedSet(list)
             if next(MState.SelectedMutations) == nil then
-                for _, pack in pairs(mobDrawings) do
-                    if pack.line then
-                        pack.line.Visible = false
-                    end
-                end
+                for inst in pairs(mutationDrawings) do clearMutation(inst) end
             end
         end,
     })
 
     ------------------------------------------------------------
     -- Stand / Stand2 ESP (traders)
+    -- Cached once; RenderStepped only updates screen-space tracers.
     ------------------------------------------------------------
 
     local SState = {
@@ -591,49 +695,76 @@ return function(Window, meta)
         Color = Color3.fromRGB(255, 220, 80),
     }
 
-    local standDrawings = {} -- [instance] = pack
+    local standDrawings = {}
+    local standCache = {}
+    local standConnections = {}
+    local STAND_SET = { Stand = true, Stand2 = true }
+
+    local function getStandAdornee(inst)
+        if not inst or not inst.Parent then return nil end
+        if inst:IsA("Model") then
+            return inst:FindFirstChild("HumanoidRootPart")
+                or inst.PrimaryPart
+                or inst:FindFirstChildWhichIsA("BasePart", true)
+        elseif inst:IsA("BasePart") then
+            return inst
+        elseif inst:IsA("Folder") then
+            return inst:FindFirstChildWhichIsA("BasePart", true)
+        end
+        return nil
+    end
 
     local function clearStand(inst)
         local pack = standDrawings[inst]
-        if not pack then
-            return
-        end
-        if pack.highlight then
-            pack.highlight:Destroy()
-        end
-        if pack.billboard then
-            pack.billboard:Destroy()
-        end
+        if not pack then return end
+        if pack.highlight then pack.highlight:Destroy() end
+        if pack.billboard then pack.billboard:Destroy() end
         destroyLine(pack.line)
         standDrawings[inst] = nil
     end
 
     local function clearAllStands()
-        for inst in pairs(standDrawings) do
-            clearStand(inst)
+        for inst in pairs(standDrawings) do clearStand(inst) end
+    end
+
+    local function registerStand(inst)
+        if not STAND_SET[inst.Name] then return end
+        if not (inst:IsA("Model") or inst:IsA("BasePart") or inst:IsA("Folder")) then return end
+        local adornee = getStandAdornee(inst)
+        if adornee then
+            standCache[inst] = adornee
         end
     end
 
-    local function ensureStandPack(inst)
+    local function unregisterStand(inst)
+        standCache[inst] = nil
+        clearStand(inst)
+    end
+
+    local function scanStandsOnce()
+        for _, inst in ipairs(workspace:GetDescendants()) do
+            registerStand(inst)
+        end
+    end
+
+    local function rebuildStandConnections()
+        for _, c in ipairs(standConnections) do c:Disconnect() end
+        table.clear(standConnections)
+        standConnections[#standConnections + 1] = workspace.DescendantAdded:Connect(registerStand)
+        standConnections[#standConnections + 1] = workspace.DescendantRemoving:Connect(unregisterStand)
+    end
+
+    local function ensureStandPack(inst, adornee)
         local pack = standDrawings[inst]
         if pack then
+            if pack.adornee ~= adornee then
+                pack.adornee = adornee
+                if pack.billboard then pack.billboard.Adornee = adornee end
+            end
             return pack
         end
 
-        local adornee = inst
-        if inst:IsA("Model") then
-            adornee = inst:FindFirstChild("HumanoidRootPart")
-                or inst:FindFirstChildWhichIsA("BasePart")
-                or inst.PrimaryPart
-        elseif not inst:IsA("BasePart") then
-            adornee = inst:FindFirstChildWhichIsA("BasePart", true)
-        end
-        if not adornee then
-            return nil
-        end
-
-        pack = {}
-
+        pack = { adornee = adornee }
         local hl = Instance.new("Highlight")
         hl.Name = "StandESP"
         hl.Adornee = inst:IsA("Model") and inst or adornee
@@ -644,7 +775,6 @@ return function(Window, meta)
         hl.OutlineColor = SState.Color
         hl.Parent = StandFolder
         pack.highlight = hl
-        pack.adornee = adornee
 
         local bb = Instance.new("BillboardGui")
         bb.Name = "StandText"
@@ -677,6 +807,9 @@ return function(Window, meta)
         return pack
     end
 
+    scanStandsOnce()
+    rebuildStandConnections()
+
     local StandSec = Tab:CreateSection({ Name = "Stand ESP (traders)" })
 
     StandSec:AddToggle({
@@ -685,9 +818,7 @@ return function(Window, meta)
         ConfigKey = "visual.stand.enabled",
         Callback = function(v)
             SState.Enabled = v
-            if not v then
-                clearAllStands()
-            end
+            if not v then clearAllStands() end
         end,
     })
 
@@ -699,9 +830,7 @@ return function(Window, meta)
             SState.Tracer = v
             if not v then
                 for _, pack in pairs(standDrawings) do
-                    if pack.line then
-                        pack.line.Visible = false
-                    end
+                    if pack.line then pack.line.Visible = false end
                 end
             end
         end,
@@ -769,14 +898,18 @@ return function(Window, meta)
 
     ------------------------------------------------------------
     -- Render loop
+    -- Only cached objects are processed here.
     ------------------------------------------------------------
 
     RunService.RenderStepped:Connect(function()
         local cam = workspace.CurrentCamera
         Camera = cam
-        local viewport = cam and cam.ViewportSize
-        local center = viewport and Vector2.new(viewport.X / 2, viewport.Y / 2)
-        local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not cam then return end
+
+        local viewport = cam.ViewportSize
+        local center = Vector2.new(viewport.X / 2, viewport.Y / 2)
+        local character = LocalPlayer.Character
+        local myHRP = character and character:FindFirstChild("HumanoidRootPart")
 
         --------------------------------------------------------
         -- Players
@@ -788,33 +921,27 @@ return function(Window, meta)
             if any then
                 for _, player in ipairs(Players:GetPlayers()) do
                     if playerIsTarget(player) then
-                        local character = player.Character
-                        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                        local hum = character and character:FindFirstChildOfClass("Humanoid")
+                        local char = player.Character
+                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                        local hum = char and char:FindFirstChildOfClass("Humanoid")
                         if hrp and hum and hum.Health > 0 then
                             seen[player] = true
-                            local pack = ensurePlayerPack(player, character)
+                            local pack = ensurePlayerPack(player, char)
                             if pack then
                                 if pack.highlight then
                                     pack.highlight.Enabled = PState.BoxESP
-                                    pack.highlight.Adornee = character
+                                    pack.highlight.Adornee = char
                                 end
                                 if pack.billboard then
                                     pack.billboard.Enabled = PState.TextESP
                                     pack.billboard.Adornee = hrp
                                     if pack.label and PState.TextESP then
                                         local dist = myHRP and math.floor((myHRP.Position - hrp.Position).Magnitude) or 0
-                                        pack.label.Text = string.format(
-                                            "%s\nHP %.0f/%.0f\n%d studs",
-                                            player.Name,
-                                            hum.Health,
-                                            hum.MaxHealth,
-                                            dist
-                                        )
+                                        pack.label.Text = string.format("%s\nHP %.0f/%.0f\n%d studs", player.Name, hum.Health, hum.MaxHealth, dist)
                                         pack.label.TextColor3 = PState.Color
                                     end
                                 end
-                                if pack.line and PState.TracerESP and center and cam then
+                                if pack.line and PState.TracerESP then
                                     local pos, onScreen = cam:WorldToViewportPoint(hrp.Position)
                                     if onScreen and pos.Z > 0 then
                                         pack.line.From = center
@@ -834,30 +961,33 @@ return function(Window, meta)
             end
 
             for player in pairs(playerDrawings) do
-                if not seen[player] then
-                    clearPlayer(player)
-                end
+                if not seen[player] then clearPlayer(player) end
             end
         end
 
         --------------------------------------------------------
-        -- Mobs
+        -- Mobs + independent mutations
         --------------------------------------------------------
         do
-            local seen = {}
+            local seenMob = {}
+            local seenMutation = {}
+            local wantMob = MState.Enabled and next(MState.SelectedMobs) ~= nil
+            local wantMutation = MState.MutationEnabled and next(MState.SelectedMutations) ~= nil
 
-            if MState.Enabled and next(MState.SelectedMobs) ~= nil then
-                for _, inst in ipairs(workspace:GetDescendants()) do
-                    local kind = matchMobType(inst.Name)
-                    if kind and inst:IsA("BasePart") then
-                        local hitbox = getHitbox(inst)
+            if wantMob or wantMutation then
+                for inst, data in pairs(mobCache) do
+                    if inst.Parent and isValidMob(inst) then
+                        local hitbox = data.hitbox
+                        if not hitbox or not hitbox.Parent then
+                            hitbox = getHitbox(inst)
+                            data.hitbox = hitbox
+                        end
+
                         if hitbox then
-                            seen[inst] = true
-                            local muts = activeMutations(inst)
-                            local wantTracer = #muts > 0
-
-                            local pack = ensureMobPack(inst, hitbox)
-                            if pack then
+                            if wantMob then
+                                seenMob[inst] = true
+                                local muts = wantMutation and activeMutations(inst) or {}
+                                local pack = ensureMobPack(inst, hitbox)
                                 if pack.highlight then
                                     pack.highlight.Enabled = MState.BoxESP
                                     pack.highlight.Adornee = inst
@@ -874,18 +1004,32 @@ return function(Window, meta)
                                         pack.label.TextColor3 = MState.Color
                                     end
                                 end
-                                if pack.line and wantTracer and center and cam then
-                                    local pos, onScreen = cam:WorldToViewportPoint(hitbox.Position)
-                                    if onScreen and pos.Z > 0 then
-                                        pack.line.From = center
-                                        pack.line.To = Vector2.new(pos.X, pos.Y)
-                                        pack.line.Color = MState.Color
-                                        pack.line.Visible = true
-                                    else
-                                        pack.line.Visible = false
+                            end
+
+                            if wantMutation then
+                                local muts = activeMutations(inst)
+                                if #muts > 0 then
+                                    seenMutation[inst] = true
+                                    local pack = ensureMutationPack(inst, hitbox)
+                                    pack.highlight.Enabled = true
+                                    pack.highlight.Adornee = inst
+                                    pack.highlight.FillColor = MState.MutationColor
+                                    pack.highlight.OutlineColor = MState.MutationColor
+                                    pack.label.Text = table.concat(muts, ", ")
+                                    pack.label.TextColor3 = MState.MutationColor
+                                    pack.billboard.Adornee = hitbox
+
+                                    if pack.line then
+                                        local pos, onScreen = cam:WorldToViewportPoint(hitbox.Position)
+                                        if onScreen and pos.Z > 0 then
+                                            pack.line.From = center
+                                            pack.line.To = Vector2.new(pos.X, pos.Y)
+                                            pack.line.Color = MState.MutationColor
+                                            pack.line.Visible = true
+                                        else
+                                            pack.line.Visible = false
+                                        end
                                     end
-                                elseif pack.line then
-                                    pack.line.Visible = false
                                 end
                             end
                         end
@@ -894,9 +1038,10 @@ return function(Window, meta)
             end
 
             for inst in pairs(mobDrawings) do
-                if not seen[inst] then
-                    clearMob(inst)
-                end
+                if not seenMob[inst] then clearMob(inst) end
+            end
+            for inst in pairs(mutationDrawings) do
+                if not seenMutation[inst] then clearMutation(inst) end
             end
         end
 
@@ -905,28 +1050,29 @@ return function(Window, meta)
         --------------------------------------------------------
         do
             local seen = {}
-
             if SState.Enabled then
-                for _, inst in ipairs(workspace:GetDescendants()) do
-                    local n = inst.Name
-                    if n == "Stand" or n == "Stand2" then
-                        if inst:IsA("Model") or inst:IsA("BasePart") or inst:IsA("Folder") then
+                for inst, cachedAdornee in pairs(standCache) do
+                    if inst.Parent then
+                        local adornee = cachedAdornee
+                        if not adornee or not adornee.Parent then
+                            adornee = getStandAdornee(inst)
+                            standCache[inst] = adornee
+                        end
+                        if adornee then
                             seen[inst] = true
-                            local pack = ensureStandPack(inst)
-                            if pack and pack.adornee and cam then
-                                if pack.line and SState.Tracer and center then
-                                    local pos, onScreen = cam:WorldToViewportPoint(pack.adornee.Position)
-                                    if onScreen and pos.Z > 0 then
-                                        pack.line.From = center
-                                        pack.line.To = Vector2.new(pos.X, pos.Y)
-                                        pack.line.Color = SState.Color
-                                        pack.line.Visible = true
-                                    else
-                                        pack.line.Visible = false
-                                    end
-                                elseif pack.line then
+                            local pack = ensureStandPack(inst, adornee)
+                            if pack and pack.line and SState.Tracer then
+                                local pos, onScreen = cam:WorldToViewportPoint(adornee.Position)
+                                if onScreen and pos.Z > 0 then
+                                    pack.line.From = center
+                                    pack.line.To = Vector2.new(pos.X, pos.Y)
+                                    pack.line.Color = SState.Color
+                                    pack.line.Visible = true
+                                else
                                     pack.line.Visible = false
                                 end
+                            elseif pack and pack.line then
+                                pack.line.Visible = false
                             end
                         end
                     end
@@ -934,9 +1080,7 @@ return function(Window, meta)
             end
 
             for inst in pairs(standDrawings) do
-                if not seen[inst] then
-                    clearStand(inst)
-                end
+                if not seen[inst] then clearStand(inst) end
             end
         end
     end)
