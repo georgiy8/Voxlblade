@@ -93,7 +93,7 @@ end
 local function getRoot()
 local character = getCharacter()
 
-```
+   
 if not character then
     return nil
 end
@@ -105,27 +105,24 @@ if root and root:IsA("BasePart") then
 end
 
 return nil
-```
 
 end
 
 local function getHumanoid()
 local character = getCharacter()
 
-```
+   
 if not character then
     return nil
 end
 
 return character:FindFirstChildOfClass("Humanoid")
-```
 
 end
 
 local function isCharacterValid()
 local character = getCharacter()
 
-```
 if not character then
     return false
 end
@@ -146,7 +143,7 @@ if humanoid.Health <= 0 then
 end
 
 return true
-```
+   
 
 end
 
@@ -163,9 +160,7 @@ if not instance then
 return nil
 end
 
-```
 return stripTrailingDigits(instance.Name)
-```
 
 end
 
@@ -187,7 +182,6 @@ if not instance then
 return false
 end
 
-```
 -- The actual mob body is a MeshPart/BasePart.
 if not instance:IsA("BasePart") then
     return false
@@ -204,7 +198,6 @@ if not MobLookup[baseName] then
 end
 
 return true
-```
 
 end
 
@@ -213,7 +206,6 @@ if not mob then
 return nil
 end
 
-```
 if not mob.Parent then
     return nil
 end
@@ -226,7 +218,6 @@ if hitbox and hitbox:IsA("BasePart") then
 end
 
 return nil
-```
 
 end
 
@@ -235,7 +226,6 @@ if not mob then
 return false
 end
 
-```
 if not mob.Parent then
     return false
 end
@@ -249,7 +239,6 @@ if not isMob(mob) then
 end
 
 return getHitbox(mob) ~= nil
-```
 
 end
 
@@ -258,7 +247,6 @@ if not hitbox then
 return false
 end
 
-```
 if not hitbox.Parent then
     return false
 end
@@ -268,7 +256,6 @@ if not hitbox:IsA("BasePart") then
 end
 
 return true
-```
 
 end
 
@@ -279,7 +266,7 @@ end
 local function getSelectedLookup(value)
 local selected = {}
 
-```
+   
 if type(value) ~= "table" then
     return selected
 end
@@ -291,7 +278,7 @@ for _, name in ipairs(value) do
 end
 
 return selected
-```
+   
 
 end
 
@@ -302,7 +289,7 @@ end
 local function getDistanceFromPlayer(part)
 local root = getRoot()
 
-```
+   
 if not root then
     return math.huge
 end
@@ -312,7 +299,7 @@ if not isValidHitbox(part) then
 end
 
 return (root.Position - part.Position).Magnitude
-```
+   
 
 end
 
@@ -325,7 +312,7 @@ if next(SelectedMobs) == nil then
 return nil
 end
 
-```
+   
 local root = getRoot()
 
 if not root then
@@ -359,7 +346,7 @@ for _, instance in ipairs(Workspace:GetDescendants()) do
 end
 
 return nearestMob
-```
+   
 
 end
 
@@ -372,7 +359,7 @@ if not FarmEnabled then
 return false
 end
 
-```
+   
 if not isCharacterValid() then
     return false
 end
@@ -402,7 +389,7 @@ if not SelectedMobs[baseName] then
 end
 
 return true
-```
+   
 
 end
 
@@ -413,7 +400,7 @@ end
 local function stopTween()
 local tween = ActiveTween
 
-```
+   
 ActiveTween = nil
 ActiveTarget = nil
 ActiveHitbox = nil
@@ -423,14 +410,14 @@ if tween then
         tween:Cancel()
     end)
 end
-```
+   
 
 end
 
 local function createTween(hitbox)
 local root = getRoot()
 
-```
+   
 if not root then
     return nil
 end
@@ -469,7 +456,7 @@ return TweenService:Create(
         CFrame = hitbox.CFrame
     }
 )
-```
+   
 
 end
 
@@ -478,7 +465,7 @@ if not FarmEnabled then
 return false
 end
 
-```
+   
 if not isCurrentTargetValid(mob, hitbox) then
     return false
 end
@@ -585,7 +572,7 @@ if ActiveTween == tween then
 end
 
 return true
-```
+   
 
 end
 
@@ -596,9 +583,9 @@ end
 local function stopFarm()
 FarmEnabled = false
 
-```
+   
 stopTween()
-```
+   
 
 end
 
@@ -608,7 +595,7 @@ FarmEnabled = true
 return
 end
 
-```
+   
 FarmEnabled = true
 FarmRunning = true
 
@@ -665,7 +652,7 @@ task.spawn(function()
 
     FarmRunning = false
 end)
-```
+   
 
 end
 
@@ -675,7 +662,7 @@ end
 
 return function(Window, meta)
 
-```
+   
 local Tab = Window:CreateTab({
     Name = "BuniFarm",
     Icon = "🐰",
@@ -821,6 +808,6 @@ KeybindSection:AddKeybind({
 --====================================================--
 
 SelectedMobs = getSelectedLookup(MOB_NAMES)
-```
+   
 
 end
