@@ -356,8 +356,8 @@ end
 
 return function(Window, meta)
     local Tab = Window:CreateTab({
-        Name = "BuniFarm",
-        Icon = "🐰",
+        Name = "Autofarm",
+        Icon = "🧑‍🌾",
         Order = (meta and meta.Order) or 15,
     })
 
