@@ -437,7 +437,7 @@ return function(Window, meta)
 
     KeybindSection:AddKeybind({
         Text = "Toggle Farm",
-        Default = Enum.KeyCode.F,
+        Default = Enum.KeyCode.Unknown,
         Callback = function()
             if FarmEnabled then
                 stopFarm()
