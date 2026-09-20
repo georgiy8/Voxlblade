@@ -1,3 +1,8 @@
+--========================================================--
+-- Autofarm Module (Voxlblade)
+-- Fly to Hitbox -> stick while alive -> next target
+-- Offset X/Y/Z + optimized mob cache
+--========================================================--
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -36,15 +41,14 @@ end
 local FarmEnabled = false
 local FarmRunning = false
 
--- Auto input state
+-- Auto input
 local AutoLeftClick = false
 local AutoRightClick = false
 local AutoQ = false
 local AutoR = false
-
 local AUTOCLICK_DELAY = 3
-local AutoClickerRunning = false
-local AutoClickerToken = 0
+local AutoInputRunning = false
+local AutoInputToken = 0
 
 local ActiveTween = nil
 local ActiveMob = nil
@@ -150,25 +154,14 @@ end
 
 local function getSelectedLookup(value)
     local selected = {}
-
-    if type(value) == "string" then
-        selected[value] = true
-        return selected
-    end
-
     if type(value) ~= "table" then
         return selected
     end
-
-    -- Supports both {"Buni", "Batty"} and {Buni = true, Batty = true}
-    for key, item in pairs(value) do
-        if type(item) == "string" then
-            selected[item] = true
-        elseif item == true and type(key) == "string" then
-            selected[key] = true
+    for _, name in ipairs(value) do
+        if type(name) == "string" then
+            selected[name] = true
         end
     end
-
     return selected
 end
 
@@ -279,24 +272,18 @@ end
 
 local function targetCFrame(hitbox)
     local off = Vector3.new(OffsetX, OffsetY, OffsetZ)
-
-    -- Keep the offset in world space.
     local pos = hitbox.Position + off
 
-    -- IMPORTANT:
-    -- Only rotate around Y. Looking directly at the hitbox with CFrame.lookAt
-    -- can pitch the character up/down and make it appear to flip over.
-    local lookPos = Vector3.new(
-        hitbox.Position.X,
-        pos.Y,
-        hitbox.Position.Z
-    )
+    -- Face the mob only around the Y axis.
+    -- This prevents the character from pitching/turning upside down
+    -- when the Hitbox is above or below the player.
+    local flatTarget = Vector3.new(hitbox.Position.X, pos.Y, hitbox.Position.Z)
 
-    if (lookPos - pos).Magnitude < 0.001 then
+    if (flatTarget - pos).Magnitude < 0.001 then
         return CFrame.new(pos)
     end
 
-    return CFrame.lookAt(pos, lookPos)
+    return CFrame.lookAt(pos, flatTarget)
 end
 
 ------------------------------------------------------------
@@ -325,11 +312,7 @@ local function stickTo(hitbox)
     if not root or not isHitboxAlive(hitbox) then
         return
     end
-
-    local goal = targetCFrame(hitbox)
-
-    -- Keep the player exactly at the farm offset, but upright.
-    root.CFrame = goal
+    root.CFrame = targetCFrame(hitbox)
     root.AssemblyLinearVelocity = Vector3.zero
     root.AssemblyAngularVelocity = Vector3.zero
 end
@@ -357,18 +340,15 @@ local function flyToHitbox(hitbox)
         TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
         { CFrame = goal }
     )
-
     ActiveTween = tw
     tw:Play()
 
     local done = false
     local conn
-
     conn = tw.Completed:Connect(function()
         done = true
         if conn then
             conn:Disconnect()
-            conn = nil
         end
     end)
 
@@ -376,30 +356,21 @@ local function flyToHitbox(hitbox)
         if not isCharacterValid() or not isHitboxAlive(hitbox) then
             break
         end
-
         if ActiveTween ~= tw then
             break
         end
-
-        -- If the mob moves, immediately switch to the normal stick phase
-        -- instead of finishing the old tween position.
+        -- early stick if already close (target moved toward us)
         local r = getRoot()
-        if r then
-            local currentGoal = targetCFrame(hitbox)
-            if (r.Position - currentGoal.Position).Magnitude <= StickDistance then
-                done = true
-                break
-            end
+        if r and (r.Position - targetCFrame(hitbox).Position).Magnitude <= StickDistance then
+            done = true
+            break
         end
-
         task.wait()
     end
 
     if conn then
         conn:Disconnect()
-        conn = nil
     end
-
     if ActiveTween == tw then
         stopTween()
     end
@@ -408,71 +379,99 @@ local function flyToHitbox(hitbox)
 end
 
 ------------------------------------------------------------
--- Auto input
+-- Auto input (Potassium)
 ------------------------------------------------------------
 
-local function autoClickerEnabled()
-    return AutoLeftClick or AutoRightClick or AutoQ or AutoR
+local function robloxWindowActive()
+    return type(isrbxactive) == "function" and isrbxactive()
 end
 
-local function fireAutoInputs()
-    -- These are Potassium input functions.
-    -- No cursor movement is performed: the autofarm already positions
-    -- and faces the character toward the active hitbox.
-
-    if AutoLeftClick then
-        pcall(mouse1click)
-    end
-
-    if AutoRightClick then
-        pcall(mouse2click)
-    end
-
-    if AutoQ then
-        pcall(keyclick, 0x51) -- Q
-    end
-
-    if AutoR then
-        pcall(keyclick, 0x52) -- R
-    end
-end
-
-local function startAutoClicker()
-    if AutoClickerRunning then
+local function sendLeftClick()
+    if not robloxWindowActive() then
         return
     end
 
-    AutoClickerRunning = true
-    AutoClickerToken += 1
-    local myToken = AutoClickerToken
+    pcall(function()
+        mouse1press()
+        task.wait(0.05)
+        mouse1release()
+    end)
+end
+
+local function sendRightClick()
+    if not robloxWindowActive() then
+        return
+    end
+
+    pcall(function()
+        mouse2press()
+        task.wait(0.05)
+        mouse2release()
+    end)
+end
+
+local function sendKey(vk)
+    if not robloxWindowActive() then
+        return
+    end
+
+    pcall(function()
+        keypress(vk)
+        task.wait(0.05)
+        keyrelease(vk)
+    end)
+end
+
+local function anyAutoInputEnabled()
+    return AutoLeftClick or AutoRightClick or AutoQ or AutoR
+end
+
+local function stopAutoInput()
+    AutoInputToken += 1
+    AutoInputRunning = false
+end
+
+local function startAutoInput()
+    if AutoInputRunning then
+        return
+    end
+
+    AutoInputRunning = true
+    AutoInputToken += 1
+    local token = AutoInputToken
 
     task.spawn(function()
-        while myToken == AutoClickerToken do
-            if not autoClickerEnabled() then
-                break
-            end
-
-            -- Input is sent only when the farm has a real active target.
-            if FarmRunning
-                and FarmEnabled
+        while token == AutoInputToken and anyAutoInputEnabled() do
+            -- Only send input when the farm is actually attached to a target.
+            if FarmEnabled
+                and FarmRunning
                 and Stuck
                 and isMobAlive(ActiveMob, ActiveHitbox) then
 
-                fireAutoInputs()
+                if AutoLeftClick then
+                    sendLeftClick()
+                end
+
+                if AutoRightClick then
+                    sendRightClick()
+                end
+
+                if AutoQ then
+                    sendKey(0x51) -- Q
+                end
+
+                if AutoR then
+                    sendKey(0x52) -- R
+                end
             end
 
             task.wait(AUTOCLICK_DELAY)
         end
 
-        if myToken == AutoClickerToken then
-            AutoClickerRunning = false
+        if token == AutoInputToken then
+            AutoInputRunning = false
         end
     end)
-end
-
-local function stopAutoClicker()
-    AutoClickerToken += 1
-    AutoClickerRunning = false
 end
 
 ------------------------------------------------------------
@@ -513,8 +512,7 @@ end
 local function stopFarm()
     FarmEnabled = false
     unstick()
-    -- Stop any pending click cycle when the farm is manually stopped.
-    stopAutoClicker()
+    stopAutoInput()
 end
 
 local function startFarm()
@@ -585,6 +583,7 @@ local function startFarm()
         unstick()
         unbindHeartbeat()
         FarmRunning = false
+        stopAutoInput()
     end)
 end
 
@@ -713,13 +712,14 @@ return function(Window, meta)
 
     local MobSection = Tab:CreateSection({ Name = "Mob Types" })
 
-    SelectedMobs = getSelectedLookup(MOB_NAMES)
+    -- Nothing is selected on startup.
+    SelectedMobs = {}
 
     MobSection:AddDropdown({
         Text = "Select Mobs",
         Options = MOB_NAMES,
         MultiSelect = true,
-        Default = MOB_NAMES,
+        Default = {},
         ConfigKey = "autofarm.mobs",
         Callback = function(Value)
             SelectedMobs = getSelectedLookup(Value)
@@ -744,11 +744,10 @@ return function(Window, meta)
         ConfigKey = "autofarm.autoClick.left",
         Callback = function(Value)
             AutoLeftClick = Value
-
             if Value then
-                startAutoClicker()
-            elseif not autoClickerEnabled() then
-                stopAutoClicker()
+                startAutoInput()
+            elseif not anyAutoInputEnabled() then
+                stopAutoInput()
             end
         end,
     })
@@ -759,11 +758,10 @@ return function(Window, meta)
         ConfigKey = "autofarm.autoClick.right",
         Callback = function(Value)
             AutoRightClick = Value
-
             if Value then
-                startAutoClicker()
-            elseif not autoClickerEnabled() then
-                stopAutoClicker()
+                startAutoInput()
+            elseif not anyAutoInputEnabled() then
+                stopAutoInput()
             end
         end,
     })
@@ -774,11 +772,10 @@ return function(Window, meta)
         ConfigKey = "autofarm.autoClick.q",
         Callback = function(Value)
             AutoQ = Value
-
             if Value then
-                startAutoClicker()
-            elseif not autoClickerEnabled() then
-                stopAutoClicker()
+                startAutoInput()
+            elseif not anyAutoInputEnabled() then
+                stopAutoInput()
             end
         end,
     })
@@ -789,17 +786,16 @@ return function(Window, meta)
         ConfigKey = "autofarm.autoClick.r",
         Callback = function(Value)
             AutoR = Value
-
             if Value then
-                startAutoClicker()
-            elseif not autoClickerEnabled() then
-                stopAutoClicker()
+                startAutoInput()
+            elseif not anyAutoInputEnabled() then
+                stopAutoInput()
             end
         end,
     })
 
     AutoClickSection:AddLabel({
-        Text = "Interval: 3 seconds | Works only on the active farm target.",
+        Text = "3 sec delay. Roblox window must be active.",
     })
 
     ------------------------------------------------------------
