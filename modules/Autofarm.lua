@@ -46,7 +46,7 @@ local AutoLeftClick = false
 local AutoRightClick = false
 local AutoQ = false
 local AutoR = false
-local AUTOCLICK_DELAY = 3
+local AUTOCLICK_DELAY = 0,5
 local AutoInputRunning = false
 local AutoInputToken = 0
 
