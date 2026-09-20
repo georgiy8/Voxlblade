@@ -28,7 +28,8 @@ local MOB_NAMES = {
     "Puffball",
     "SporeBossMan",
     "Sporeling",
-    "Lord Stratos Altolodon",
+    "Lord Stratos",
+    "Altolodon",
     "Whirlray",
     "Caci",
     "Slizard",
@@ -56,6 +57,57 @@ local MOB_NAMES = {
     "Easter",
     "Grumpkin",
     "THEHALLOWSOUL",
+    "Budboy",
+    "Snoeman",
+    "Gremlin",
+    "IronSlayer",
+    "Gremlinancer",
+}
+
+-- Same species as MOB_NAMES, grouped by spawn location for the dropdown UI.
+-- A species that spawns in more than one zone (e.g. Mageling in both Forest
+-- and Magus) is listed ONCE only — repeating the same string twice in a
+-- MultiSelect dropdown would desync the two checkboxes visually even though
+-- they'd share the same selection state under the hood, so one shared entry
+-- is both simpler and correct.
+local MOB_OPTIONS = {
+    { Separator = true, Text = "Plains" },
+    "Buni", "DireBuni", "PlainsWoof",
+
+    { Separator = true, Text = "Forest" },
+    "Mageling", -- Buni / DireBuni / PlainsWoof also here, already listed under Plains
+
+    { Separator = true, Text = "Vinelands" },
+    "Croakernaut", "LordFrogg", "Bulfrogg", "Toadzerker", "Dragigator", "Lilimonster",
+
+    { Separator = true, Text = "Flora Fields" },
+    "Drone", "Bumblz", "Bomber", "QueenBumblz", "Budboy",
+
+    { Separator = true, Text = "Magus" },
+    "Puffball", "SporeBossMan", "Sporeling", -- Mageling also here, already listed under Forest
+
+    { Separator = true, Text = "Skylands" },
+    "Lord Stratos", "Altolodon", "Whirlray",
+
+    { Separator = true, Text = "Desert" },
+    "Caci", "Slizard", "CaciKing",
+
+    { Separator = true, Text = "Deadlands" },
+    "StoneCleric", "VoidRoot", "Bowldur", "BastionGuardian", "StoneArcher", "StoneKnight",
+
+    { Separator = true, Text = "Hare Lair" },
+    "CrazyHare", "BaniPrince", "RedRockHare", "Batty", -- Buni / DireBuni also here
+
+    { Separator = true, Text = "Tundra" },
+    "GlacialSnapper", "Snoeman", "WinterWoof", "Delta-Spider", "Stalker", "Scow",
+    "SteamGolem", "Omega-Batty", "DeepSpider", "BrainBurner", "Proto-Mungus",
+    -- Puffball also here, already listed under Magus
+
+    { Separator = true, Text = "Void" },
+    "Gremlin", "IronSlayer", "Gremlinancer",
+
+    { Separator = true, Text = "Event Enemies" },
+    "Easter", "Grumpkin", "THEHALLOWSOUL",
 }
 
 -- Per-mob ESP colors
@@ -77,7 +129,8 @@ local MOB_COLORS = {
     ["Puffball"] = Color3.fromRGB(220, 90, 190),
     ["SporeBossMan"] = Color3.fromRGB(255, 105, 170),
     ["Sporeling"] = Color3.fromRGB(35, 175, 255),
-    ["Lord Stratos Altolodon"] = Color3.fromRGB(235, 235, 245),
+    ["Lord Stratos"] = Color3.fromRGB(235, 235, 245),
+    ["Altolodon"] = Color3.fromRGB(150, 195, 235),
     ["Whirlray"] = Color3.fromRGB(175, 190, 195),
     ["Caci"] = Color3.fromRGB(70, 180, 75),
     ["Slizard"] = Color3.fromRGB(145, 95, 60),
@@ -105,6 +158,11 @@ local MOB_COLORS = {
     ["Easter"] = Color3.fromRGB(255, 125, 190),
     ["Grumpkin"] = Color3.fromRGB(220, 125, 35),
     ["THEHALLOWSOUL"] = Color3.fromRGB(70, 45, 25),
+    ["Budboy"] = Color3.fromRGB(230, 60, 60),
+    ["Snoeman"] = Color3.fromRGB(210, 225, 235),
+    ["Gremlin"] = Color3.fromRGB(150, 60, 220),
+    ["IronSlayer"] = Color3.fromRGB(120, 120, 140),
+    ["Gremlinancer"] = Color3.fromRGB(170, 80, 210),
 }
 
 local MOB_BY_LEN = table.clone(MOB_NAMES)
@@ -727,7 +785,7 @@ return function(Window, meta)
     MobSec:AddDropdown({
         Text = "Mobs (multi)",
         MultiSelect = true,
-        Options = MOB_NAMES,
+        Options = MOB_OPTIONS,
         Default = {},
         ConfigKey = "visual.mob.list",
         Callback = function(list)
