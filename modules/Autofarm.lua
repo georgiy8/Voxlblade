@@ -1,10 +1,12 @@
 --========================================================--
 -- Autofarm Module (Voxlblade)
--- Tween to mob Hitbox + mob multi-select
+-- Fly to Hitbox -> stick while alive -> next target
+-- Offset X/Y/Z + optimized mob cache
 --========================================================--
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
@@ -22,34 +24,51 @@ local MOB_NAMES = {
     "Easter", "Grumpkin", "THEHALLOWSOUL",
 }
 
+local MOB_BY_LEN = table.clone(MOB_NAMES)
+table.sort(MOB_BY_LEN, function(a, b)
+    return #a > #b
+end)
+
 local MobLookup = {}
 for _, name in ipairs(MOB_NAMES) do
     MobLookup[name] = true
 end
 
+------------------------------------------------------------
+-- State
+------------------------------------------------------------
+
 local FarmEnabled = false
 local FarmRunning = false
+
 local ActiveTween = nil
-local ActiveTarget = nil
+local ActiveMob = nil
 local ActiveHitbox = nil
+local Stuck = false
+
 local TweenSpeed = 50
-local StopDistance = 2
+local StickDistance = 4
+
+local OffsetX = 0
+local OffsetY = 3
+local OffsetZ = 0
+
 local SelectedMobs = {}
 
-local TargetSearchDelay = 0.05
-local NoTargetDelay = 0.10
-local CharacterWaitDelay = 0.20
+-- cache: [mob BasePart] = hitbox BasePart
+local MobCache = {}
+local CacheDirty = true
+local LastCacheRebuild = 0
+local CACHE_INTERVAL = 0.75
+
+local HeartbeatConn = nil
 
 ------------------------------------------------------------
 -- Character
 ------------------------------------------------------------
 
-local function getCharacter()
-    return LocalPlayer and LocalPlayer.Character
-end
-
 local function getRoot()
-    local character = getCharacter()
+    local character = LocalPlayer.Character
     if not character then
         return nil
     end
@@ -61,38 +80,40 @@ local function getRoot()
 end
 
 local function isCharacterValid()
-    local character = getCharacter()
+    local character = LocalPlayer.Character
     if not character then
         return false
     end
     local root = character:FindFirstChild("HumanoidRootPart")
     local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not root or not root:IsA("BasePart") then
-        return false
-    end
-    if not humanoid or humanoid.Health <= 0 then
-        return false
-    end
-    return true
+    return root
+        and root:IsA("BasePart")
+        and humanoid
+        and humanoid.Health > 0
 end
 
 ------------------------------------------------------------
--- Mobs: MeshPart "Buni07" -> child Hitbox
+-- Mob helpers
 ------------------------------------------------------------
 
-local function getBaseMobName(instance)
-    if not instance then
+local function matchMobType(name)
+    if type(name) ~= "string" then
         return nil
     end
-    return tostring(instance.Name):gsub("%d+$", "")
-end
-
-local function isMob(instance)
-    if not instance or not instance:IsA("BasePart") then
-        return false
+    for _, kind in ipairs(MOB_BY_LEN) do
+        if SelectedMobs[kind] then
+            if name == kind then
+                return kind
+            end
+            if name:sub(1, #kind) == kind then
+                local rest = name:sub(#kind + 1)
+                if rest == "" or rest:match("^%d") or rest:match("^[%s%-%_]") then
+                    return kind
+                end
+            end
+        end
     end
-    local baseName = getBaseMobName(instance)
-    return baseName ~= nil and MobLookup[baseName] == true
+    return nil
 end
 
 local function getHitbox(mob)
@@ -106,16 +127,20 @@ local function getHitbox(mob)
     return nil
 end
 
-local function isValidMob(mob)
-    return mob
-        and mob.Parent
-        and mob:IsA("BasePart")
-        and isMob(mob)
-        and getHitbox(mob) ~= nil
+local function isHitboxAlive(hitbox)
+    return hitbox
+        and hitbox.Parent
+        and hitbox:IsA("BasePart")
 end
 
-local function isValidHitbox(hitbox)
-    return hitbox and hitbox.Parent and hitbox:IsA("BasePart")
+local function isMobAlive(mob, hitbox)
+    if not mob or not mob.Parent then
+        return false
+    end
+    if not mob:IsA("BasePart") then
+        return false
+    end
+    return isHitboxAlive(hitbox) and getHitbox(mob) == hitbox
 end
 
 local function getSelectedLookup(value)
@@ -132,163 +157,238 @@ local function getSelectedLookup(value)
 end
 
 ------------------------------------------------------------
--- Find nearest
+-- Optimized cache (no GetDescendants every frame)
 ------------------------------------------------------------
 
-local function findNearestMob()
-    if next(SelectedMobs) == nil then
-        return nil
+local function tryRegister(inst)
+    if not inst or not inst:IsA("BasePart") then
+        return
     end
-    local root = getRoot()
-    if not root then
-        return nil
+    if not matchMobType(inst.Name) then
+        -- still allow cache by full lookup for rebuild
+        local base = tostring(inst.Name):gsub("%d+$", "")
+        if not MobLookup[base] then
+            return
+        end
     end
+    local hitbox = getHitbox(inst)
+    if hitbox then
+        MobCache[inst] = hitbox
+    end
+end
 
-    local nearestMob = nil
-    local nearestDistance = math.huge
-
-    for _, instance in ipairs(Workspace:GetDescendants()) do
-        if isMob(instance) then
-            local baseName = getBaseMobName(instance)
-            if baseName and SelectedMobs[baseName] then
-                local hitbox = getHitbox(instance)
+local function rebuildCache()
+    table.clear(MobCache)
+    for _, inst in ipairs(Workspace:GetDescendants()) do
+        if inst:IsA("BasePart") then
+            local base = tostring(inst.Name):gsub("%d+$", "")
+            if MobLookup[base] then
+                local hitbox = getHitbox(inst)
                 if hitbox then
-                    local distance = (root.Position - hitbox.Position).Magnitude
-                    if distance < nearestDistance then
-                        nearestDistance = distance
-                        nearestMob = instance
-                    end
+                    MobCache[inst] = hitbox
                 end
             end
         end
     end
-
-    return nearestMob
+    LastCacheRebuild = os.clock()
+    CacheDirty = false
 end
 
-local function isCurrentTargetValid(mob, hitbox)
-    if not FarmEnabled or not isCharacterValid() then
-        return false
+local function ensureCache()
+    local now = os.clock()
+    if CacheDirty or (now - LastCacheRebuild) >= CACHE_INTERVAL then
+        rebuildCache()
     end
-    if not isValidMob(mob) or not isValidHitbox(hitbox) then
-        return false
-    end
-    if getHitbox(mob) ~= hitbox then
-        return false
-    end
-    local baseName = getBaseMobName(mob)
-    if not baseName or not SelectedMobs[baseName] then
-        return false
-    end
-    return true
 end
+
+Workspace.DescendantAdded:Connect(function(inst)
+    task.defer(function()
+        tryRegister(inst)
+        if inst.Name == "Hitbox" and inst.Parent then
+            tryRegister(inst.Parent)
+        end
+    end)
+end)
+
+Workspace.DescendantRemoving:Connect(function(inst)
+    if MobCache[inst] then
+        MobCache[inst] = nil
+    end
+    if ActiveMob == inst then
+        ActiveMob = nil
+        ActiveHitbox = nil
+        Stuck = false
+    end
+end)
 
 ------------------------------------------------------------
--- Tween
+-- Target pick
 ------------------------------------------------------------
 
-local function stopTween()
-    local tween = ActiveTween
-    ActiveTween = nil
-    ActiveTarget = nil
-    ActiveHitbox = nil
-    if tween then
-        pcall(function()
-            tween:Cancel()
-        end)
-    end
-end
-
-local function createTween(hitbox)
-    local root = getRoot()
-    if not root or not isValidHitbox(hitbox) then
-        return nil
-    end
-
-    local distance = (root.Position - hitbox.Position).Magnitude
-    if distance <= StopDistance then
-        return nil
-    end
-
-    local speed = math.max(1, tonumber(TweenSpeed) or 50)
-    local duration = math.max(0.01, distance / speed)
-
-    return TweenService:Create(
-        root,
-        TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
-        { CFrame = hitbox.CFrame }
-    )
-end
-
-local function tweenToHitbox(mob, hitbox)
-    if not FarmEnabled or not isCurrentTargetValid(mob, hitbox) then
-        return false
+local function findNearestMob()
+    if next(SelectedMobs) == nil then
+        return nil, nil
     end
 
     local root = getRoot()
     if not root then
+        return nil, nil
+    end
+
+    ensureCache()
+
+    local bestMob, bestHitbox = nil, nil
+    local bestDist = math.huge
+    local origin = root.Position
+
+    for mob, hitbox in pairs(MobCache) do
+        if isMobAlive(mob, hitbox) and matchMobType(mob.Name) then
+            local d = (origin - hitbox.Position).Magnitude
+            if d < bestDist then
+                bestDist = d
+                bestMob = mob
+                bestHitbox = hitbox
+            end
+        else
+            MobCache[mob] = nil
+        end
+    end
+
+    return bestMob, bestHitbox
+end
+
+------------------------------------------------------------
+-- Offset CFrame on hitbox
+------------------------------------------------------------
+
+local function targetCFrame(hitbox)
+    local off = Vector3.new(OffsetX, OffsetY, OffsetZ)
+    -- offset in world space relative to hitbox position, face hitbox center
+    local pos = hitbox.Position + off
+    return CFrame.lookAt(pos, hitbox.Position)
+end
+
+------------------------------------------------------------
+-- Tween / stick
+------------------------------------------------------------
+
+local function stopTween()
+    local tw = ActiveTween
+    ActiveTween = nil
+    if tw then
+        pcall(function()
+            tw:Cancel()
+        end)
+    end
+end
+
+local function unstick()
+    Stuck = false
+    stopTween()
+    ActiveMob = nil
+    ActiveHitbox = nil
+end
+
+local function stickTo(hitbox)
+    local root = getRoot()
+    if not root or not isHitboxAlive(hitbox) then
+        return
+    end
+    root.CFrame = targetCFrame(hitbox)
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function flyToHitbox(hitbox)
+    local root = getRoot()
+    if not root or not isHitboxAlive(hitbox) then
         return false
     end
 
-    if (root.Position - hitbox.Position).Magnitude <= StopDistance then
+    local goal = targetCFrame(hitbox)
+    local dist = (root.Position - goal.Position).Magnitude
+
+    if dist <= StickDistance then
         return true
     end
 
     stopTween()
 
-    local tween = createTween(hitbox)
-    if not tween then
-        return true
-    end
+    local speed = math.max(1, TweenSpeed)
+    local duration = math.max(0.05, dist / speed)
 
-    ActiveTween = tween
-    ActiveTarget = mob
-    ActiveHitbox = hitbox
+    local tw = TweenService:Create(
+        root,
+        TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+        { CFrame = goal }
+    )
+    ActiveTween = tw
+    tw:Play()
 
-    local completed = false
-    local connection
-    connection = tween.Completed:Connect(function()
-        completed = true
-        if connection then
-            connection:Disconnect()
-            connection = nil
+    local done = false
+    local conn
+    conn = tw.Completed:Connect(function()
+        done = true
+        if conn then
+            conn:Disconnect()
         end
     end)
 
-    tween:Play()
-
-    while FarmEnabled and not completed do
-        if not isCharacterValid() or not isCurrentTargetValid(mob, hitbox) then
+    while FarmEnabled and not done do
+        if not isCharacterValid() or not isHitboxAlive(hitbox) then
             break
         end
-        if ActiveTween ~= tween then
+        if ActiveTween ~= tw then
             break
         end
-        local currentRoot = getRoot()
-        if not currentRoot then
-            break
-        end
-        if (currentRoot.Position - hitbox.Position).Magnitude <= StopDistance then
+        -- early stick if already close (target moved toward us)
+        local r = getRoot()
+        if r and (r.Position - targetCFrame(hitbox).Position).Magnitude <= StickDistance then
+            done = true
             break
         end
         task.wait()
     end
 
-    if connection then
-        connection:Disconnect()
+    if conn then
+        conn:Disconnect()
+    end
+    if ActiveTween == tw then
+        stopTween()
     end
 
-    pcall(function()
-        tween:Cancel()
+    return isHitboxAlive(hitbox)
+end
+
+------------------------------------------------------------
+-- Heartbeat: while Stuck, glue to hitbox every frame
+------------------------------------------------------------
+
+local function bindHeartbeat()
+    if HeartbeatConn then
+        return
+    end
+    HeartbeatConn = RunService.Heartbeat:Connect(function()
+        if not FarmEnabled or not Stuck then
+            return
+        end
+        if not isCharacterValid() then
+            unstick()
+            return
+        end
+        if not isMobAlive(ActiveMob, ActiveHitbox) then
+            unstick()
+            return
+        end
+        stickTo(ActiveHitbox)
     end)
+end
 
-    if ActiveTween == tween then
-        ActiveTween = nil
-        ActiveTarget = nil
-        ActiveHitbox = nil
+local function unbindHeartbeat()
+    if HeartbeatConn then
+        HeartbeatConn:Disconnect()
+        HeartbeatConn = nil
     end
-
-    return completed
 end
 
 ------------------------------------------------------------
@@ -297,55 +397,76 @@ end
 
 local function stopFarm()
     FarmEnabled = false
-    stopTween()
+    unstick()
 end
 
 local function startFarm()
     if FarmRunning then
         FarmEnabled = true
+        bindHeartbeat()
         return
     end
 
     FarmEnabled = true
     FarmRunning = true
+    bindHeartbeat()
+    CacheDirty = true
 
     task.spawn(function()
         while FarmEnabled do
             if not isCharacterValid() then
-                stopTween()
-                task.wait(CharacterWaitDelay)
+                unstick()
+                task.wait(0.2)
                 continue
             end
 
             if next(SelectedMobs) == nil then
-                stopTween()
-                task.wait(NoTargetDelay)
+                unstick()
+                task.wait(0.15)
                 continue
             end
 
-            local mob = findNearestMob()
-            if not mob then
-                stopTween()
-                task.wait(NoTargetDelay)
+            -- already stuck on living target
+            if Stuck and isMobAlive(ActiveMob, ActiveHitbox) then
+                task.wait(0.05)
                 continue
             end
 
-            local hitbox = getHitbox(mob)
-            if not hitbox then
-                task.wait(TargetSearchDelay)
+            -- target gone -> free
+            if Stuck then
+                unstick()
+            end
+
+            local mob, hitbox = findNearestMob()
+            if not mob or not hitbox then
+                unstick()
+                task.wait(0.12)
                 continue
             end
 
-            ActiveTarget = mob
+            ActiveMob = mob
             ActiveHitbox = hitbox
-            tweenToHitbox(mob, hitbox)
+            Stuck = false
 
-            if FarmEnabled then
-                task.wait(TargetSearchDelay)
+            local ok = flyToHitbox(hitbox)
+            if not FarmEnabled then
+                break
+            end
+
+            if ok and isMobAlive(mob, hitbox) then
+                -- glue
+                Stuck = true
+                ActiveMob = mob
+                ActiveHitbox = hitbox
+                stickTo(hitbox)
+            else
+                unstick()
+                task.wait(0.05)
             end
         end
 
-        stopTween()
+        unstick()
+        unbindHeartbeat()
         FarmRunning = false
     end)
 end
@@ -356,8 +477,8 @@ end
 
 return function(Window, meta)
     local Tab = Window:CreateTab({
-        Name = "Autofarm",
-        Icon = "🧑‍🌾",
+        Name = "BuniFarm",
+        Icon = "AF",
         Order = (meta and meta.Order) or 15,
     })
 
@@ -366,6 +487,7 @@ return function(Window, meta)
     FarmSection:AddToggle({
         Text = "Enable Farm",
         Default = false,
+        ConfigKey = "autofarm.enabled",
         Callback = function(Value)
             if Value then
                 startFarm()
@@ -389,14 +511,19 @@ return function(Window, meta)
         end,
     })
 
-    local SpeedSection = Tab:CreateSection({ Name = "Tween" })
+    ------------------------------------------------------------
+    -- Movement
+    ------------------------------------------------------------
 
-    SpeedSection:AddSlider({
+    local MoveSection = Tab:CreateSection({ Name = "Movement" })
+
+    MoveSection:AddSlider({
         Text = "Tween Speed",
         Min = 1,
         Max = 500,
         Default = 50,
         Increment = 1,
+        ConfigKey = "autofarm.tweenSpeed",
         Callback = function(Value)
             TweenSpeed = math.max(1, tonumber(Value) or 50)
             if ActiveTween then
@@ -405,16 +532,67 @@ return function(Window, meta)
         end,
     })
 
-    SpeedSection:AddSlider({
-        Text = "Stop Distance",
-        Min = 0,
-        Max = 10,
-        Default = 2,
+    MoveSection:AddSlider({
+        Text = "Stick Distance",
+        Min = 0.5,
+        Max = 15,
+        Default = 4,
         Increment = 0.5,
+        ConfigKey = "autofarm.stickDistance",
         Callback = function(Value)
-            StopDistance = math.max(0, tonumber(Value) or 2)
+            StickDistance = math.max(0.5, tonumber(Value) or 4)
         end,
     })
+
+    ------------------------------------------------------------
+    -- Offset (hero relative to Hitbox)
+    ------------------------------------------------------------
+
+    local OffSection = Tab:CreateSection({ Name = "Offset (X Y Z)" })
+
+    OffSection:AddLabel({
+        Text = "Position of character relative to Hitbox while stuck / flying in.",
+    })
+
+    OffSection:AddSlider({
+        Text = "Offset X",
+        Min = -20,
+        Max = 20,
+        Default = 0,
+        Increment = 0.5,
+        ConfigKey = "autofarm.offsetX",
+        Callback = function(Value)
+            OffsetX = tonumber(Value) or 0
+        end,
+    })
+
+    OffSection:AddSlider({
+        Text = "Offset Y",
+        Min = -20,
+        Max = 20,
+        Default = 3,
+        Increment = 0.5,
+        ConfigKey = "autofarm.offsetY",
+        Callback = function(Value)
+            OffsetY = tonumber(Value) or 3
+        end,
+    })
+
+    OffSection:AddSlider({
+        Text = "Offset Z",
+        Min = -20,
+        Max = 20,
+        Default = 0,
+        Increment = 0.5,
+        ConfigKey = "autofarm.offsetZ",
+        Callback = function(Value)
+            OffsetZ = tonumber(Value) or 0
+        end,
+    })
+
+    ------------------------------------------------------------
+    -- Mobs
+    ------------------------------------------------------------
 
     local MobSection = Tab:CreateSection({ Name = "Mob Types" })
 
@@ -425,19 +603,26 @@ return function(Window, meta)
         Options = MOB_NAMES,
         MultiSelect = true,
         Default = MOB_NAMES,
+        ConfigKey = "autofarm.mobs",
         Callback = function(Value)
             SelectedMobs = getSelectedLookup(Value)
+            CacheDirty = true
             if next(SelectedMobs) == nil then
-                stopTween()
+                unstick()
             end
         end,
     })
+
+    ------------------------------------------------------------
+    -- Keybind
+    ------------------------------------------------------------
 
     local KeybindSection = Tab:CreateSection({ Name = "Keybind" })
 
     KeybindSection:AddKeybind({
         Text = "Toggle Farm",
         Default = Enum.KeyCode.Unknown,
+        ConfigKey = "autofarm.toggleKey",
         Callback = function()
             if FarmEnabled then
                 stopFarm()
