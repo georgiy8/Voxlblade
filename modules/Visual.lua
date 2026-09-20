@@ -64,12 +64,6 @@ local MOB_NAMES = {
     "Gremlinancer",
 }
 
--- Same species as MOB_NAMES, grouped by spawn location for the dropdown UI.
--- A species that spawns in more than one zone (e.g. Mageling in both Forest
--- and Magus) is listed ONCE only — repeating the same string twice in a
--- MultiSelect dropdown would desync the two checkboxes visually even though
--- they'd share the same selection state under the hood, so one shared entry
--- is both simpler and correct.
 local MOB_OPTIONS = {
     { Separator = true, Text = "Plains" },
     "Buni", "DireBuni", "PlainsWoof",
