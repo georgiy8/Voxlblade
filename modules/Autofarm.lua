@@ -596,13 +596,13 @@ return function(Window, meta)
 
     local MobSection = Tab:CreateSection({ Name = "Mob Types" })
 
-    SelectedMobs = getSelectedLookup(MOB_NAMES)
+    SelectedMobs = {}
 
     MobSection:AddDropdown({
         Text = "Select Mobs",
         Options = MOB_NAMES,
         MultiSelect = true,
-        Default = MOB_NAMES,
+        Default = {},
         ConfigKey = "autofarm.mobs",
         Callback = function(Value)
             SelectedMobs = getSelectedLookup(Value)
