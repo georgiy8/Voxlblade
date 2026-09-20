@@ -531,13 +531,13 @@ local function startFarm()
         while FarmEnabled do
             if not isCharacterValid() then
                 unstick()
-                task.wait(0.2)
+                task.wait(0.03)
                 continue
             end
 
             if next(SelectedMobs) == nil then
                 unstick()
-                task.wait(0.15)
+                task.wait(0.03)
                 continue
             end
 
@@ -555,7 +555,7 @@ local function startFarm()
             local mob, hitbox = findNearestMob()
             if not mob or not hitbox then
                 unstick()
-                task.wait(0.12)
+                task.wait(0.02)
                 continue
             end
 
