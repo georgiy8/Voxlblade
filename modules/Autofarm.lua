@@ -41,6 +41,13 @@ end
 local FarmEnabled = false
 local FarmRunning = false
 
+local AutoLeftClick = false
+local AutoRightClick = false
+local AutoQ = false
+local AutoR = false
+
+local AUTOCLICK_DELAY = 3
+
 local ActiveTween = nil
 local ActiveMob = nil
 local ActiveHitbox = nil
@@ -131,6 +138,57 @@ local function isHitboxAlive(hitbox)
     return hitbox
         and hitbox.Parent
         and hitbox:IsA("BasePart")
+end
+
+local function isTargetReady()
+    return FarmRunning
+        and ActiveMob
+        and ActiveHitbox
+        and isHitboxAlive(ActiveHitbox)
+end
+
+local function startLeftClicker()
+    task.spawn(function()
+        while AutoLeftClick do
+            if isTargetReady() and isrbxactive() then
+                mouse1click()
+            end
+            task.wait(AUTOCLICK_DELAY)
+        end
+    end)
+end
+
+local function startRightClicker()
+    task.spawn(function()
+        while AutoRightClick do
+            if isTargetReady() and isrbxactive() then
+                mouse2click()
+            end
+            task.wait(AUTOCLICK_DELAY)
+        end
+    end)
+end
+
+local function startQClicker()
+    task.spawn(function()
+        while AutoQ do
+            if isTargetReady() and isrbxactive() then
+                keyclick(0x51)
+            end
+            task.wait(AUTOCLICK_DELAY)
+        end
+    end)
+end
+
+local function startRClicker()
+    task.spawn(function()
+        while AutoR do
+            if isTargetReady() and isrbxactive() then
+                keyclick(0x52)
+            end
+            task.wait(AUTOCLICK_DELAY)
+        end
+    end)
 end
 
 local function isMobAlive(mob, hitbox)
@@ -612,6 +670,66 @@ return function(Window, meta)
             end
         end,
     })
+
+    ------------------------------------------------------------
+-- Auto Clicker
+------------------------------------------------------------
+
+local AutoClickSection = Tab:CreateSection({
+    Name = "Auto Clicker"
+})
+
+AutoClickSection:AddToggle({
+    Text = "Left Click",
+    Default = false,
+    ConfigKey = "autofarm.autoClick.left",
+    Callback = function(Value)
+        AutoLeftClick = Value
+
+        if Value then
+            startLeftClicker()
+        end
+    end,
+})
+
+AutoClickSection:AddToggle({
+    Text = "Right Click",
+    Default = false,
+    ConfigKey = "autofarm.autoClick.right",
+    Callback = function(Value)
+        AutoRightClick = Value
+
+        if Value then
+            startRightClicker()
+        end
+    end,
+})
+
+AutoClickSection:AddToggle({
+    Text = "Q",
+    Default = false,
+    ConfigKey = "autofarm.autoClick.q",
+    Callback = function(Value)
+        AutoQ = Value
+
+        if Value then
+            startQClicker()
+        end
+    end,
+})
+
+AutoClickSection:AddToggle({
+    Text = "R",
+    Default = false,
+    ConfigKey = "autofarm.autoClick.r",
+    Callback = function(Value)
+        AutoR = Value
+
+        if Value then
+            startRClicker()
+        end
+    end,
+})
 
     ------------------------------------------------------------
     -- Keybind
