@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -49,6 +50,14 @@ local AutoR = false
 local AUTOCLICK_DELAY = 0.1
 local AutoInputRunning = false
 local AutoInputToken = 0
+
+-- Weapon equip (SwordEquipped attribute + Events.EquipWeapon)
+local EquipWeaponRemote = nil
+local LastEquipAttempt = 0
+local EQUIP_COOLDOWN = 1.5
+local WeaponAttrConn = nil
+local WeaponCharConn = nil
+local WeaponWatchToken = 0
 
 local ActiveTween = nil
 local ActiveMob = nil
@@ -506,6 +515,139 @@ local function unbindHeartbeat()
 end
 
 ------------------------------------------------------------
+-- Weapon equip watch (event-driven + rare safety poll)
+-- No-op when already equipped; remote only if SwordEquipped ~= true
+------------------------------------------------------------
+
+local function getEquipWeaponRemote()
+    if EquipWeaponRemote and EquipWeaponRemote.Parent then
+        return EquipWeaponRemote
+    end
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    if not events then
+        return nil
+    end
+    local remote = events:FindFirstChild("EquipWeapon")
+    if remote then
+        EquipWeaponRemote = remote
+    end
+    return EquipWeaponRemote
+end
+
+local function isWeaponEquipped()
+    local character = LocalPlayer.Character
+    if not character then
+        return false
+    end
+    return character:GetAttribute("SwordEquipped") == true
+end
+
+local function tryEquipWeapon()
+    if not FarmEnabled then
+        return
+    end
+    if isWeaponEquipped() then
+        return
+    end
+
+    local now = os.clock()
+    if now - LastEquipAttempt < EQUIP_COOLDOWN then
+        return
+    end
+    LastEquipAttempt = now
+
+    local remote = getEquipWeaponRemote()
+    if not remote then
+        warn("[Autofarm] EquipWeapon remote not found")
+        return
+    end
+
+    local ok, err = pcall(function()
+        if remote:IsA("RemoteFunction") then
+            remote:InvokeServer()
+        else
+            remote:FireServer()
+        end
+    end)
+
+    if not ok then
+        warn("[Autofarm] EquipWeapon failed:", err)
+        return
+    end
+
+    task.defer(function()
+        task.wait(0.3)
+        if not FarmEnabled then
+            return
+        end
+        local character = LocalPlayer.Character
+        if character and character:GetAttribute("SwordEquipped") == true then
+            print("[Autofarm] weapon equipped:", character:GetAttribute("SwordType"))
+        end
+    end)
+end
+
+local function unbindWeaponWatch()
+    WeaponWatchToken += 1
+    if WeaponAttrConn then
+        WeaponAttrConn:Disconnect()
+        WeaponAttrConn = nil
+    end
+    if WeaponCharConn then
+        WeaponCharConn:Disconnect()
+        WeaponCharConn = nil
+    end
+end
+
+local function bindWeaponAttr(character)
+    if WeaponAttrConn then
+        WeaponAttrConn:Disconnect()
+        WeaponAttrConn = nil
+    end
+    if not character then
+        return
+    end
+    WeaponAttrConn = character:GetAttributeChangedSignal("SwordEquipped"):Connect(function()
+        if not FarmEnabled then
+            return
+        end
+        if character:GetAttribute("SwordEquipped") ~= true then
+            tryEquipWeapon()
+        end
+    end)
+end
+
+local function bindWeaponWatch()
+    unbindWeaponWatch()
+    local token = WeaponWatchToken
+
+    bindWeaponAttr(LocalPlayer.Character)
+
+    WeaponCharConn = LocalPlayer.CharacterAdded:Connect(function(character)
+        if not FarmEnabled then
+            return
+        end
+        bindWeaponAttr(character)
+        task.defer(tryEquipWeapon)
+    end)
+
+    -- one shot on start
+    tryEquipWeapon()
+
+    -- safety net: only when unequipped; sleeps long while equipped
+    task.spawn(function()
+        while FarmEnabled and token == WeaponWatchToken do
+            if isWeaponEquipped() then
+                task.wait(3)
+            else
+                tryEquipWeapon()
+                task.wait(EQUIP_COOLDOWN)
+            end
+        end
+    end)
+end
+
+------------------------------------------------------------
 -- Farm loop
 ------------------------------------------------------------
 
@@ -513,18 +655,21 @@ local function stopFarm()
     FarmEnabled = false
     unstick()
     stopAutoInput()
+    unbindWeaponWatch()
 end
 
 local function startFarm()
     if FarmRunning then
         FarmEnabled = true
         bindHeartbeat()
+        bindWeaponWatch()
         return
     end
 
     FarmEnabled = true
     FarmRunning = true
     bindHeartbeat()
+    bindWeaponWatch()
     CacheDirty = true
 
     task.spawn(function()
