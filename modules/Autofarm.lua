@@ -73,6 +73,12 @@ local OffsetZ = 0
 
 local SelectedMobs = {}
 
+-- Rest / search point (wait here when no selected mobs)
+local RestPosition = nil -- Vector3
+local UseRestPoint = true
+local RestArriveDistance = 4
+local AtRest = false
+
 -- cache: [mob BasePart] = hitbox BasePart
 local MobCache = {}
 local CacheDirty = true
@@ -648,6 +654,155 @@ local function bindWeaponWatch()
 end
 
 ------------------------------------------------------------
+-- Rest point (no targets -> go wait here)
+------------------------------------------------------------
+
+local function saveRestPosition()
+    local root = getRoot()
+    if not root then
+        warn("[Autofarm] no character to save rest point")
+        return false
+    end
+    RestPosition = root.Position
+    print(string.format(
+        "[Autofarm] rest point saved: %.1f, %.1f, %.1f",
+        RestPosition.X, RestPosition.Y, RestPosition.Z
+    ))
+    return true
+end
+
+local function clearRestPosition()
+    RestPosition = nil
+    AtRest = false
+    print("[Autofarm] rest point cleared")
+end
+
+local function flyToPosition(pos)
+    local root = getRoot()
+    if not root or not pos then
+        return false
+    end
+
+    local goal = CFrame.new(pos)
+    local dist = (root.Position - pos).Magnitude
+    if dist <= RestArriveDistance then
+        root.CFrame = goal
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+        return true
+    end
+
+    stopTween()
+
+    local speed = math.max(1, TweenSpeed)
+    local duration = math.max(0.05, dist / speed)
+    local tw = TweenService:Create(
+        root,
+        TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+        { CFrame = goal }
+    )
+    ActiveTween = tw
+    tw:Play()
+
+    local done = false
+    local conn
+    conn = tw.Completed:Connect(function()
+        done = true
+        if conn then
+            conn:Disconnect()
+        end
+    end)
+
+    while FarmEnabled and not done do
+        if not isCharacterValid() then
+            break
+        end
+        if ActiveTween ~= tw then
+            break
+        end
+        -- abort rest travel if a mob appeared
+        if next(SelectedMobs) ~= nil then
+            local m = findNearestMob()
+            if m then
+                break
+            end
+        end
+        local r = getRoot()
+        if r and (r.Position - pos).Magnitude <= RestArriveDistance then
+            done = true
+            break
+        end
+        task.wait()
+    end
+
+    if conn then
+        conn:Disconnect()
+    end
+    if ActiveTween == tw then
+        stopTween()
+    end
+
+    root = getRoot()
+    if root and (root.Position - pos).Magnitude <= RestArriveDistance + 2 then
+        root.CFrame = CFrame.new(pos)
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+        return true
+    end
+    return false
+end
+
+local function goRestAndWait()
+    if not UseRestPoint or not RestPosition then
+        AtRest = false
+        task.wait(0.15)
+        return
+    end
+
+    unstick()
+    AtRest = false
+
+    local arrived = flyToPosition(RestPosition)
+    if not FarmEnabled then
+        return
+    end
+
+    if arrived then
+        AtRest = true
+    end
+
+    -- sit at rest until a selected mob appears or farm stops
+    while FarmEnabled do
+        if next(SelectedMobs) ~= nil then
+            local mob = findNearestMob()
+            if mob then
+                AtRest = false
+                return
+            end
+        end
+
+        -- stay glued to rest point lightly
+        if RestPosition and isCharacterValid() then
+            local root = getRoot()
+            if root and (root.Position - RestPosition).Magnitude > RestArriveDistance then
+                AtRest = false
+                flyToPosition(RestPosition)
+                if not FarmEnabled then
+                    return
+                end
+                AtRest = true
+            elseif root then
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+            end
+        end
+
+        task.wait(0.2)
+    end
+    AtRest = false
+end
+
+------------------------------------------------------------
 -- Farm loop
 ------------------------------------------------------------
 
@@ -680,14 +835,15 @@ local function startFarm()
                 continue
             end
 
+            -- no mob types selected OR none alive nearby -> rest point
             if next(SelectedMobs) == nil then
-                unstick()
-                task.wait(0.03)
+                goRestAndWait()
                 continue
             end
 
             -- already stuck on living target
             if Stuck and isMobAlive(ActiveMob, ActiveHitbox) then
+                AtRest = false
                 task.wait(0.05)
                 continue
             end
@@ -699,10 +855,11 @@ local function startFarm()
 
             local mob, hitbox = findNearestMob()
             if not mob or not hitbox then
-                unstick()
-                task.wait(0.02)
+                goRestAndWait()
                 continue
             end
+
+            AtRest = false
 
             ActiveMob = mob
             ActiveHitbox = hitbox
@@ -802,6 +959,57 @@ return function(Window, meta)
         ConfigKey = "autofarm.stickDistance",
         Callback = function(Value)
             StickDistance = math.max(0.5, tonumber(Value) or 4)
+        end,
+    })
+
+    ------------------------------------------------------------
+    -- Rest / search point
+    ------------------------------------------------------------
+
+    local RestSection = Tab:CreateSection({ Name = "Rest Point" })
+
+    RestSection:AddLabel({
+        Text = "If no selected mobs are nearby, return here and wait.",
+    })
+
+    RestSection:AddToggle({
+        Text = "Use Rest Point",
+        Default = true,
+        ConfigKey = "autofarm.useRestPoint",
+        Callback = function(Value)
+            UseRestPoint = Value and true or false
+            if not UseRestPoint then
+                AtRest = false
+            end
+        end,
+    })
+
+    RestSection:AddButton({
+        Text = "Save Rest Point (current position)",
+        Callback = function()
+            saveRestPosition()
+        end,
+    })
+
+    RestSection:AddButton({
+        Text = "Clear Rest Point",
+        Callback = function()
+            clearRestPosition()
+        end,
+    })
+
+    RestSection:AddButton({
+        Text = "Print Rest Point",
+        Callback = function()
+            if RestPosition then
+                print(string.format(
+                    "[Autofarm] rest: %.2f, %.2f, %.2f | atRest=%s",
+                    RestPosition.X, RestPosition.Y, RestPosition.Z,
+                    tostring(AtRest)
+                ))
+            else
+                print("[Autofarm] rest point not set")
+            end
         end,
     })
 
